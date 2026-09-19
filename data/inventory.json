@@ -1,0 +1,24 @@
+[
+  {
+    "id": "d3bc7043-d2b5-4d26-83e1-d2f53322f9a7",
+    "nombre": "Laptop HP Pavilion",
+    "descripcion": "Laptop para oficina",
+    "cantidad": 10,
+    "precio": 899.99,
+    "categoria": "Electrónica",
+    "ubicacion": "Almacén A",
+    "createdAt": "2026-09-18T20:46:18.295Z",
+    "updatedAt": "2026-09-18T22:52:28.536Z"
+  },
+  {
+    "id": "fa262996-21a6-43c1-8a31-d35e860a36fc",
+    "nombre": "Mouse Inalámbrico",
+    "descripcion": "Mouse ergonómico",
+    "cantidad": 50,
+    "precio": 25.5,
+    "categoria": "Accesorios",
+    "ubicacion": "Almacén B",
+    "createdAt": "2026-09-18T20:46:18.296Z",
+    "updatedAt": "2026-09-18T20:46:18.296Z"
+  }
+]
