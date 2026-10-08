@@ -1,35 +1,42 @@
-import express from 'express';
-import cors from 'cors';
-import helmet from 'helmet';
-import morgan from 'morgan';
 import dotenv from 'dotenv';
-
-import { errorHandler } from './middleware/errorHandler.js';
-import { notFound } from './middleware/notFound.js';
-import inventoryRoutes from './routes/inventory.routes.js';
-
 dotenv.config();
 
-const app = express();
+import app from './app.js';
+import { initDb } from './db.js';
+
 const PORT = process.env.PORT || 3000;
 
-app.use(helmet());
-app.use(cors({ origin: 'http://localhost:5174' }));
-app.use(morgan('dev'));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-app.get('/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
+// Inicializar tablas de PostgreSQL al arrancar el servidor
+initDb().catch((err) => {
+  console.warn('Advertencia al inicializar base de datos:', err.message);
 });
 
-app.use('/api/inventory', inventoryRoutes);
-
-app.use(notFound);
-app.use(errorHandler);
-
-app.listen(PORT, () => {
-  console.log(`Servidor corriendo en puerto ${PORT}`);
+const server = app.listen(PORT, () => {
+  console.log(`🚀 Servidor corriendo exitosamente en http://localhost:${PORT}`);
+  console.log(`📡 Endpoints montados:`);
+  console.log(`   - GET  /api/activos`);
+  console.log(`   - GET  /api/consumibles`);
+  console.log(`   - GET  /api/prestamos`);
+  console.log(`   - POST /api/prestamos`);
+  console.log(`   - PUT  /api/prestamos/:id/devolver`);
 });
+
+server.on('error', (error) => {
+  if (error.code === 'EADDRINUSE') {
+    console.error(`❌ Error: El puerto ${PORT} ya está en uso por otro proceso.`);
+  } else {
+    console.error('❌ Error en el servidor Express:', error);
+  }
+});
+
+const gracefulShutdown = () => {
+  server.close(() => {
+    console.log('Servidor detenido.');
+    process.exit(0);
+  });
+};
+
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);
 
 export default app;
