@@ -84,6 +84,132 @@ router.post('/activos', async (req, res, next) => {
   }
 });
 
+// PUT/PATCH /api/activos/:id - Actualizar datos completos del activo / equipo
+const handleUpdateActivo = async (req, res, next) => {
+  try {
+    const paramId = (req.params.id || req.params.placa || '').trim();
+
+    // 1. Desestructuración completa del cuerpo de la petición (req.body)
+    const {
+      nombre,
+      equipo,
+      categoria,
+      condicion,
+      area,
+      ubicacion,
+      sede,
+      cantidad,
+      descripcion,
+      marca,
+      modelo,
+      serial,
+      caracteristica_1,
+      caracteristica_2,
+      caracteristica_3,
+      responsable,
+      custodio,
+      estado,
+      fecha_devolucion,
+      proveedor,
+      valor_compra,
+      valor_total,
+      fecha_compra,
+      fecha_vencimiento_garantia,
+      claves_otros,
+      observaciones
+    } = req.body;
+
+    const nombreFinal = nombre !== undefined ? nombre : (equipo !== undefined ? equipo : null);
+    const ubicacionFinal = ubicacion !== undefined ? ubicacion : (sede !== undefined ? sede : null);
+    const responsableFinal = responsable !== undefined ? responsable : (custodio !== undefined ? custodio : null);
+
+    const isNumericId = /^\d+$/.test(paramId);
+
+    // 2. Consulta SQL con COALESCE y RETURNING *
+    const updateQuery = `
+      UPDATE activos SET
+        nombre = COALESCE($1, nombre),
+        categoria = COALESCE($2, categoria),
+        condicion = COALESCE($3, condicion),
+        area = COALESCE($4, area),
+        ubicacion = COALESCE($5, ubicacion),
+        cantidad = COALESCE($6, cantidad),
+        descripcion = COALESCE($7, descripcion),
+        marca = COALESCE($8, marca),
+        modelo = COALESCE($9, modelo),
+        serial = COALESCE($10, serial),
+        caracteristica_1 = COALESCE($11, caracteristica_1),
+        caracteristica_2 = COALESCE($12, caracteristica_2),
+        caracteristica_3 = COALESCE($13, caracteristica_3),
+        responsable = COALESCE($14, responsable),
+        proveedor = COALESCE($15, proveedor),
+        valor_compra = COALESCE($16, valor_compra),
+        valor_total = COALESCE($17, valor_total),
+        fecha_compra = COALESCE($18, fecha_compra),
+        fecha_vencimiento_garantia = COALESCE($19, fecha_vencimiento_garantia),
+        claves_otros = COALESCE($20, claves_otros),
+        observaciones = COALESCE($21, observaciones),
+        estado = COALESCE($22, estado),
+        custodio = COALESCE($23, custodio),
+        fecha_devolucion = COALESCE($24, fecha_devolucion),
+        sede = COALESCE($25, sede)
+      WHERE ${isNumericId ? '(id = $26 OR LOWER(placa) = LOWER($27))' : 'LOWER(placa) = LOWER($26)'}
+      RETURNING *;
+    `;
+
+    const values = [
+      nombreFinal,
+      categoria !== undefined ? categoria : null,
+      condicion !== undefined ? condicion : null,
+      area !== undefined ? area : null,
+      ubicacionFinal,
+      cantidad !== undefined && cantidad !== '' ? parseInt(cantidad, 10) : null,
+      descripcion !== undefined ? descripcion : null,
+      marca !== undefined ? marca : null,
+      modelo !== undefined ? modelo : null,
+      serial !== undefined ? serial : null,
+      caracteristica_1 !== undefined ? caracteristica_1 : null,
+      caracteristica_2 !== undefined ? caracteristica_2 : null,
+      caracteristica_3 !== undefined ? caracteristica_3 : null,
+      responsableFinal,
+      proveedor !== undefined ? proveedor : null,
+      valor_compra !== undefined && valor_compra !== '' ? parseFloat(valor_compra) : null,
+      valor_total !== undefined && valor_total !== '' ? parseFloat(valor_total) : null,
+      fecha_compra ? fecha_compra : null,
+      fecha_vencimiento_garantia ? fecha_vencimiento_garantia : null,
+      claves_otros !== undefined ? claves_otros : null,
+      observaciones !== undefined ? observaciones : null,
+      estado !== undefined ? estado : null,
+      responsableFinal,
+      fecha_devolucion ? fecha_devolucion : null,
+      ubicacionFinal,
+      isNumericId ? parseInt(paramId, 10) : paramId,
+      ...(isNumericId ? [paramId] : [])
+    ];
+
+    const result = await pool.query(updateQuery, values);
+
+    if (!result.rows || result.rows.length === 0) {
+      return res.status(404).json({ success: false, message: `Activo con identificador "${paramId}" no encontrado.` });
+    }
+
+    // 3. Respuesta JSON del endpoint
+    res.json({
+      success: true,
+      data: result.rows[0],
+      message: 'Equipo actualizado con éxito'
+    });
+  } catch (error) {
+    console.error('Error al actualizar activo:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+router.put('/activos/:id', handleUpdateActivo);
+router.patch('/activos/:id', handleUpdateActivo);
+router.put('/activos/:placa', handleUpdateActivo);
+router.patch('/activos/:placa', handleUpdateActivo);
+
 // ==========================================
 // 2. CONSUMIBLES
 // ==========================================
@@ -96,6 +222,147 @@ router.get('/consumibles', async (req, res, next) => {
   } catch (error) {
     console.error('Error al obtener consumibles de DB:', error.message);
     res.status(500).json({ success: false, data: [], error: error.message });
+  }
+});
+
+// POST /api/consumibles - Registrar nuevo consumible / material
+router.post('/consumibles', async (req, res, next) => {
+  try {
+    const {
+      id,
+      material,
+      categoria,
+      disponible,
+      minimo,
+      ubicacion,
+      descripcion,
+      caracteristicas,
+      estado,
+      condicion,
+      observaciones,
+      valor_compra,
+      fecha_compra,
+      fecha_vencimiento_garantia
+    } = req.body;
+
+    // Validación básica de requeridos
+    if (!id || !material) {
+      return res.status(400).json({
+        success: false,
+        message: 'El código (id) y el nombre del material son obligatorios'
+      });
+    }
+
+    const query = `
+      INSERT INTO consumibles (
+        id, material, categoria, disponible, minimo, ubicacion,
+        descripcion, caracteristicas, estado, condicion, observaciones,
+        valor_compra, fecha_compra, fecha_vencimiento_garantia
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      RETURNING *;
+    `;
+
+    const values = [
+      id,
+      material,
+      categoria || 'Robótica',
+      parseInt(disponible) || 0,
+      parseInt(minimo) || 5,
+      ubicacion || 'Oficina FMO',
+      descripcion || null,
+      caracteristicas || null,
+      estado || 'Bueno',
+      condicion || 'Nuevo',
+      observaciones || null,
+      valor_compra || null,
+      fecha_compra || null,
+      fecha_vencimiento_garantia || null
+    ];
+
+    const result = await pool.query(query, values);
+
+    res.status(201).json({
+      success: true,
+      data: result.rows[0],
+      message: 'Consumible registrado con éxito'
+    });
+  } catch (error) {
+    console.error('Error al registrar consumible:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// PUT /api/consumibles/:id - Actualizar datos del consumible
+router.put('/consumibles/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      material,
+      categoria,
+      disponible,
+      minimo,
+      ubicacion,
+      descripcion,
+      caracteristicas,
+      estado,
+      condicion,
+      observaciones,
+      valor_compra,
+      fecha_compra,
+      fecha_vencimiento_garantia
+    } = req.body;
+
+    const query = `
+      UPDATE consumibles
+      SET 
+        material = COALESCE($1, material),
+        categoria = COALESCE($2, categoria),
+        disponible = COALESCE($3, disponible),
+        minimo = COALESCE($4, minimo),
+        ubicacion = COALESCE($5, ubicacion),
+        descripcion = $6,
+        caracteristicas = $7,
+        estado = COALESCE($8, estado),
+        condicion = COALESCE($9, condicion),
+        observaciones = $10,
+        valor_compra = $11,
+        fecha_compra = $12,
+        fecha_vencimiento_garantia = $13
+      WHERE id = $14
+      RETURNING *;
+    `;
+
+    const values = [
+      material,
+      categoria,
+      disponible !== undefined ? parseInt(disponible) : undefined,
+      minimo !== undefined ? parseInt(minimo) : undefined,
+      ubicacion,
+      descripcion || null,
+      caracteristicas || null,
+      estado || 'Bueno',
+      condicion || 'Nuevo',
+      observaciones || null,
+      valor_compra || null,
+      fecha_compra || null,
+      fecha_vencimiento_garantia || null,
+      id
+    ];
+
+    const result = await pool.query(query, values);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ success: false, message: 'Consumible no encontrado' });
+    }
+
+    res.json({
+      success: true,
+      data: result.rows[0],
+      message: 'Consumible actualizado con éxito'
+    });
+  } catch (error) {
+    console.error('Error al actualizar consumible:', error.message);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

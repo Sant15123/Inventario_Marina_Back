@@ -15,6 +15,8 @@ const server = app.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo exitosamente en http://localhost:${PORT}`);
   console.log(`📡 Endpoints montados:`);
   console.log(`   - GET  /api/activos`);
+  console.log(`   - POST /api/activos`);
+  console.log(`   - PUT/PATCH /api/activos/:placa`);
   console.log(`   - GET  /api/consumibles`);
   console.log(`   - GET  /api/prestamos`);
   console.log(`   - POST /api/prestamos`);

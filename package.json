@@ -8,6 +8,7 @@
     "start": "node src/server.js",
     "server": "node src/server.js",
     "dev": "nodemon src/server.js",
+    "seed:activos": "node src/seedActivos.js",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage",
     "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch",
     "lint": "eslint src/",
@@ -28,7 +29,8 @@
     "joi": "^18.2.9",
     "morgan": "^1.12.1",
     "pg": "^8.23.1",
-    "uuid": "^14.0.2"
+    "uuid": "^14.0.2",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "eslint": "^10.11.0",

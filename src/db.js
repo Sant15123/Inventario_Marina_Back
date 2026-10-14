@@ -18,35 +18,26 @@ dotenv.config();
 
 const { Pool } = pkg;
 
-const primaryUrl = process.env.DATABASE_URL;
-const localFallbackUrl = 'postgresql://postgres:postgres@localhost:5432/inventario_marina';
+const databaseUrl = process.env.DATABASE_URL;
 
-const createPool = (connectionString) => {
-  const isLocal = connectionString.includes('localhost') || connectionString.includes('127.0.0.1');
-  return new Pool({
-    connectionString,
-    ssl: isLocal ? false : { rejectUnauthorized: false },
-    connectionTimeoutMillis: 5000,
-  });
-};
+if (!databaseUrl) {
+  console.error('❌ Error crítico: DATABASE_URL no está definida en las variables de entorno.');
+}
 
-export let pool = createPool(primaryUrl || localFallbackUrl);
+export const pool = new Pool({
+  connectionString: databaseUrl,
+  ssl: { rejectUnauthorized: false },
+  connectionTimeoutMillis: 10000,
+});
 
 export const initDb = async () => {
   let client;
   try {
     client = await pool.connect();
-    console.log('✅ Conexión con base de datos establecida.');
+    console.log('✅ Conexión con Supabase (PostgreSQL) establecida.');
   } catch (err) {
-    console.warn(`⚠️ Error conectando a DB remota (${err.message}), usando fallback local postgres...`);
-    pool = createPool(localFallbackUrl);
-    try {
-      client = await pool.connect();
-      console.log('✅ Conexión con PostgreSQL local establecida.');
-    } catch (localErr) {
-      console.error('❌ No se pudo conectar a la base de datos:', localErr.message);
-      return;
-    }
+    console.error('❌ Error conectando a la base de datos Supabase:', err.message);
+    throw err;
   }
 
   try {
@@ -64,6 +55,23 @@ export const initDb = async () => {
         estado VARCHAR(50) DEFAULT 'Disponible',
         custodio VARCHAR(255),
         fecha_devolucion DATE,
+        categoria VARCHAR(100),
+        condicion VARCHAR(100),
+        area VARCHAR(100),
+        ubicacion VARCHAR(255),
+        cantidad INT DEFAULT 1,
+        descripcion TEXT,
+        caracteristica_1 VARCHAR(255),
+        caracteristica_2 VARCHAR(255),
+        caracteristica_3 VARCHAR(255),
+        responsable VARCHAR(255),
+        proveedor VARCHAR(255),
+        valor_compra NUMERIC,
+        valor_total NUMERIC,
+        fecha_compra DATE,
+        fecha_vencimiento_garantia DATE,
+        claves_otros TEXT,
+        observaciones TEXT,
         created_at TIMESTAMP DEFAULT NOW()
       );
     `);
