@@ -78,7 +78,15 @@ router.post('/activos', async (req, res, next) => {
   } catch (error) {
     console.error('Error al crear activo:', error.message);
     if (error.code === '23505') {
-      return res.status(400).json({ success: false, message: 'Ya existe un activo con esa placa o serial' });
+      const constraint = (error.constraint || '').toLowerCase();
+      const detail = (error.detail || '').toLowerCase();
+      if (constraint.includes('placa') || detail.includes('placa')) {
+        return res.status(409).json({ success: false, message: 'Ya existe un activo registrado con esta placa/código.' });
+      }
+      if (constraint.includes('serial') || detail.includes('serial')) {
+        return res.status(409).json({ success: false, message: 'Ya existe un equipo registrado con este número de serial.' });
+      }
+      return res.status(409).json({ success: false, message: 'Ya existe un registro con estos datos únicos (placa o serial).' });
     }
     res.status(500).json({ success: false, error: error.message });
   }
@@ -201,6 +209,17 @@ const handleUpdateActivo = async (req, res, next) => {
     });
   } catch (error) {
     console.error('Error al actualizar activo:', error.message);
+    if (error.code === '23505') {
+      const constraint = (error.constraint || '').toLowerCase();
+      const detail = (error.detail || '').toLowerCase();
+      if (constraint.includes('placa') || detail.includes('placa')) {
+        return res.status(409).json({ success: false, message: 'Ya existe un activo registrado con esta placa/código.' });
+      }
+      if (constraint.includes('serial') || detail.includes('serial')) {
+        return res.status(409).json({ success: false, message: 'Ya existe un equipo registrado con este número de serial.' });
+      }
+      return res.status(409).json({ success: false, message: 'Ya existe un registro con estos datos únicos (placa o serial).' });
+    }
     res.status(500).json({ success: false, error: error.message });
   }
 };
