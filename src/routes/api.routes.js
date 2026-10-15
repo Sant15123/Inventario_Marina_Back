@@ -50,7 +50,8 @@ router.post('/activos', async (req, res, next) => {
       sede = 'Medellín',
       estado = 'Disponible',
       custodio = null,
-      fecha_devolucion = null
+      fecha_devolucion = null,
+      ubicacion_estante = null
     } = req.body;
 
     if (!placa || !nombre) {
@@ -58,8 +59,8 @@ router.post('/activos', async (req, res, next) => {
     }
 
     const result = await pool.query(
-      `INSERT INTO activos (placa, nombre, marca, modelo, serial, sede, estado, custodio, fecha_devolucion)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `INSERT INTO activos (placa, nombre, marca, modelo, serial, sede, estado, custodio, fecha_devolucion, ubicacion_estante)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
       [
         placa.trim(),
@@ -70,7 +71,8 @@ router.post('/activos', async (req, res, next) => {
         sede,
         estado,
         custodio,
-        fecha_devolucion
+        fecha_devolucion,
+        ubicacion_estante || null
       ]
     );
 
@@ -124,7 +126,8 @@ const handleUpdateActivo = async (req, res, next) => {
       fecha_compra,
       fecha_vencimiento_garantia,
       claves_otros,
-      observaciones
+      observaciones,
+      ubicacion_estante
     } = req.body;
 
     const nombreFinal = nombre !== undefined ? nombre : (equipo !== undefined ? equipo : null);
@@ -160,8 +163,9 @@ const handleUpdateActivo = async (req, res, next) => {
         estado = COALESCE($22, estado),
         custodio = COALESCE($23, custodio),
         fecha_devolucion = COALESCE($24, fecha_devolucion),
-        sede = COALESCE($25, sede)
-      WHERE ${isNumericId ? '(id = $26 OR LOWER(placa) = LOWER($27))' : 'LOWER(placa) = LOWER($26)'}
+        sede = COALESCE($25, sede),
+        ubicacion_estante = COALESCE($26, ubicacion_estante)
+      WHERE ${isNumericId ? '(id = $27 OR LOWER(placa) = LOWER($28))' : 'LOWER(placa) = LOWER($27)'}
       RETURNING *;
     `;
 
@@ -191,6 +195,7 @@ const handleUpdateActivo = async (req, res, next) => {
       responsableFinal,
       fecha_devolucion ? fecha_devolucion : null,
       ubicacionFinal,
+      ubicacion_estante !== undefined ? ubicacion_estante : null,
       isNumericId ? parseInt(paramId, 10) : paramId,
       ...(isNumericId ? [paramId] : [])
     ];
@@ -261,7 +266,8 @@ router.post('/consumibles', async (req, res, next) => {
       observaciones,
       valor_compra,
       fecha_compra,
-      fecha_vencimiento_garantia
+      fecha_vencimiento_garantia,
+      ubicacion_estante
     } = req.body;
 
     // Validación básica de requeridos
@@ -276,8 +282,8 @@ router.post('/consumibles', async (req, res, next) => {
       INSERT INTO consumibles (
         id, material, categoria, disponible, minimo, ubicacion,
         descripcion, caracteristicas, estado, condicion, observaciones,
-        valor_compra, fecha_compra, fecha_vencimiento_garantia
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        valor_compra, fecha_compra, fecha_vencimiento_garantia, ubicacion_estante
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
       RETURNING *;
     `;
 
@@ -295,7 +301,8 @@ router.post('/consumibles', async (req, res, next) => {
       observaciones || null,
       valor_compra || null,
       fecha_compra || null,
-      fecha_vencimiento_garantia || null
+      fecha_vencimiento_garantia || null,
+      ubicacion_estante || null
     ];
 
     const result = await pool.query(query, values);
@@ -328,7 +335,8 @@ router.put('/consumibles/:id', async (req, res) => {
       observaciones,
       valor_compra,
       fecha_compra,
-      fecha_vencimiento_garantia
+      fecha_vencimiento_garantia,
+      ubicacion_estante
     } = req.body;
 
     const query = `
@@ -346,8 +354,9 @@ router.put('/consumibles/:id', async (req, res) => {
         observaciones = $10,
         valor_compra = $11,
         fecha_compra = $12,
-        fecha_vencimiento_garantia = $13
-      WHERE id = $14
+        fecha_vencimiento_garantia = $13,
+        ubicacion_estante = COALESCE($14, ubicacion_estante)
+      WHERE id = $15
       RETURNING *;
     `;
 
@@ -365,6 +374,7 @@ router.put('/consumibles/:id', async (req, res) => {
       valor_compra || null,
       fecha_compra || null,
       fecha_vencimiento_garantia || null,
+      ubicacion_estante !== undefined ? ubicacion_estante : null,
       id
     ];
 
@@ -386,16 +396,135 @@ router.put('/consumibles/:id', async (req, res) => {
 });
 
 // ==========================================
+// ==========================================
+// 2.1 ENTREGAS / SALIDAS DE CONSUMIBLES
+// ==========================================
+
+// GET /api/consumibles/entregas - Listar entregas de consumibles realizadas
+router.get('/consumibles/entregas', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM entregas_consumibles ORDER BY created_at DESC'
+    );
+    res.json({ success: true, data: result.rows || [] });
+  } catch (error) {
+    console.error('Error al listar entregas de consumibles:', error.message);
+    res.status(500).json({ success: false, data: [], error: error.message });
+  }
+});
+
+// POST /api/consumibles/entregas - Registrar salida definitiva de consumibles con descuento de stock
+router.post('/consumibles/entregas', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const {
+      material_id,
+      item_id,
+      material_nombre,
+      cantidad = 1,
+      responsable,
+      person,
+      sede = 'Medellín',
+      proyecto_motivo,
+      motivo,
+      tipo = 'Consumido'
+    } = req.body;
+
+    const finalMaterialId = (material_id || item_id || '').trim();
+    const finalResponsable = (responsable || person || '').trim();
+    const finalCantidad = Math.max(1, parseInt(cantidad, 10) || 1);
+    const finalMotivo = (proyecto_motivo || motivo || 'Salida de material para taller').trim();
+
+    if (!finalMaterialId || !finalResponsable) {
+      return res.status(400).json({
+        success: false,
+        message: 'El material_id (o item_id) y responsable son obligatorios para registrar la entrega.'
+      });
+    }
+
+    await client.query('BEGIN');
+
+    // 1. Verificar consumible en bodega
+    const consRes = await client.query(
+      'SELECT * FROM consumibles WHERE LOWER(id) = LOWER($1) FOR UPDATE',
+      [finalMaterialId]
+    );
+
+    if (consRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({
+        success: false,
+        message: 'Material o consumible no encontrado con id ' + finalMaterialId
+      });
+    }
+
+    const consumibleActual = consRes.rows[0];
+    const stockDisponible = parseInt(consumibleActual.disponible, 10) || 0;
+
+    if (stockDisponible < finalCantidad) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        success: false,
+        message: 'Stock insuficiente para ' + consumibleActual.material + '. Solicitado: ' + finalCantidad + ', disponible: ' + stockDisponible
+      });
+    }
+
+    // 2. Descontar stock disponible en la tabla consumibles
+    await client.query(
+      'UPDATE consumibles SET disponible = disponible - $1 WHERE id = $2 AND disponible >= $1',
+      [finalCantidad, consumibleActual.id]
+    );
+
+    // 3. Insertar en tabla entregas_consumibles
+    const insertRes = await client.query(
+      'INSERT INTO entregas_consumibles (material_id, material_nombre, cantidad, responsable, sede, proyecto_motivo, tipo, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW()) RETURNING *',
+      [
+        consumibleActual.id,
+        material_nombre || consumibleActual.material,
+        finalCantidad,
+        finalResponsable,
+        sede,
+        finalMotivo,
+        tipo
+      ]
+    );
+
+    await client.query('COMMIT');
+
+    console.log('Entrega de consumible persistida exitosamente:', insertRes.rows[0].id);
+    res.status(201).json({
+      success: true,
+      message: 'Entrega de consumible registrada exitosamente y stock descontado',
+      data: insertRes.rows[0]
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error al registrar entrega de consumible:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Error en base de datos al registrar entrega: ' + error.message
+    });
+  } finally {
+    client.release();
+  }
+});
+
 // 3. PRÉSTAMOS
 // ==========================================
 
-// GET /api/prestamos - Lista historial de préstamos
+// GET /api/prestamos - Lista historial de préstamos (activos y consumibles)
 router.get('/prestamos', async (req, res, next) => {
   try {
     const query = `
-      SELECT p.*, a.nombre as nombre_activo, a.marca, a.modelo
+      SELECT 
+        p.*,
+        COALESCE(a.nombre, c.material, p.placa_activo) as nombre_activo,
+        a.marca,
+        a.modelo,
+        c.categoria as categoria_consumible
       FROM prestamos p
       LEFT JOIN activos a ON LOWER(p.placa_activo) = LOWER(a.placa)
+      LEFT JOIN consumibles c ON LOWER(p.placa_activo) = LOWER(c.id)
       ORDER BY p.id DESC
     `;
     const result = await pool.query(query);
@@ -406,80 +535,182 @@ router.get('/prestamos', async (req, res, next) => {
   }
 });
 
-// POST /api/prestamos - Registra préstamo y actualiza activo (transacción)
+// POST /api/prestamos - Registra préstamo (activo o consumible) y actualiza stock/estado (transacción)
 router.post('/prestamos', async (req, res, next) => {
   const client = await pool.connect();
   try {
     const {
       placa_activo,
+      item_id,
+      tipo_item,
+      cantidad = 1,
       solicitante,
+      responsable,
       sede = 'Medellín',
       motivo = '',
       fecha_salida,
-      fecha_devolucion_esperada
+      fecha_devolucion_esperada,
+      fecha_devolucion_estimada
     } = req.body;
 
-    if (!placa_activo || !solicitante || !fecha_devolucion_esperada) {
+    const finalItemId = (item_id || placa_activo || '').trim();
+    const finalSolicitante = (solicitante || responsable || '').trim();
+    const finalFechaDevolucion = fecha_devolucion_esperada || fecha_devolucion_estimada;
+    const finalCantidad = Math.max(1, parseInt(cantidad, 10) || 1);
+
+    if (!finalItemId || !finalSolicitante || !finalFechaDevolucion) {
       return res.status(400).json({
         success: false,
-        message: 'placa_activo, solicitante y fecha_devolucion_esperada son requeridos.'
+        message: 'El identificador del ítem (item_id o placa_activo), solicitante y fecha_devolucion_esperada son requeridos.'
       });
     }
 
     await client.query('BEGIN');
 
-    const activoRes = await client.query(
-      'SELECT * FROM activos WHERE LOWER(placa) = LOWER($1) FOR UPDATE',
-      [placa_activo.trim()]
-    );
-
-    if (activoRes.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ success: false, message: `Activo con placa ${placa_activo} no encontrado.` });
+    // Determinar si es consumible o activo
+    let detectedTipo = tipo_item ? tipo_item.toLowerCase() : null;
+    if (!detectedTipo) {
+      if (finalItemId.toUpperCase().startsWith('ROB') || finalItemId.toUpperCase().startsWith('MAT')) {
+        detectedTipo = 'consumible';
+      } else {
+        const checkCons = await client.query('SELECT id FROM consumibles WHERE LOWER(id) = LOWER($1)', [finalItemId]);
+        detectedTipo = checkCons.rows.length > 0 ? 'consumible' : 'activo';
+      }
     }
 
-    const activoActual = activoRes.rows[0];
+    let prestamoInsertado;
 
-    const prestamoRes = await client.query(
-      `INSERT INTO prestamos (placa_activo, solicitante, sede, motivo, fecha_salida, fecha_devolucion_esperada, estado)
-       VALUES ($1, $2, $3, $4, COALESCE($5::date, CURRENT_DATE), $6, 'Activo')
-       RETURNING *`,
-      [
-        activoActual.placa,
-        solicitante.trim(),
-        sede,
-        motivo,
-        fecha_salida || null,
-        fecha_devolucion_esperada
-      ]
-    );
+    if (detectedTipo === 'consumible') {
+      // 1. Verificar consumible y stock disponible
+      const consRes = await client.query(
+        'SELECT * FROM consumibles WHERE LOWER(id) = LOWER($1) FOR UPDATE',
+        [finalItemId]
+      );
 
-    await client.query(
-      `UPDATE activos
-       SET estado = 'En campo',
-           custodio = $1,
-           fecha_devolucion = $2
-       WHERE placa = $3`,
-      [solicitante.trim(), fecha_devolucion_esperada, activoActual.placa]
-    );
+      if (consRes.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({
+          success: false,
+          message: `Consumible/insumo con código ${finalItemId} no encontrado.`
+        });
+      }
+
+      const consumibleActual = consRes.rows[0];
+      const stockDisponible = parseInt(consumibleActual.disponible, 10) || 0;
+
+      if (stockDisponible < finalCantidad) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          success: false,
+          message: `Stock insuficiente para ${consumibleActual.material} (Solicitado: ${finalCantidad}, Disponible: ${stockDisponible})`
+        });
+      }
+
+      // 2. Descontar stock disponible en tabla consumibles
+      await client.query(
+        'UPDATE consumibles SET disponible = disponible - $1 WHERE id = $2 AND disponible >= $1',
+        [finalCantidad, consumibleActual.id]
+      );
+
+      // 3. Insertar préstamo con tipo_item = consumible y cantidad
+      const prestamoRes = await client.query(
+        `INSERT INTO prestamos (
+            placa_activo,
+            tipo_item,
+            cantidad,
+            solicitante,
+            sede,
+            motivo,
+            fecha_salida,
+            fecha_devolucion_esperada,
+            estado
+          )
+          VALUES ($1, 'consumible', $2, $3, $4, $5, COALESCE($6::date, CURRENT_DATE), $7, 'Activo')
+          RETURNING *`,
+        [
+          consumibleActual.id,
+          finalCantidad,
+          finalSolicitante,
+          sede,
+          motivo,
+          fecha_salida || null,
+          finalFechaDevolucion
+        ]
+      );
+
+      prestamoInsertado = prestamoRes.rows[0];
+      prestamoInsertado.nombre_activo = consumibleActual.material;
+    } else {
+      // Flujo de Activo Tecnológico
+      const activoRes = await client.query(
+        'SELECT * FROM activos WHERE LOWER(placa) = LOWER($1) FOR UPDATE',
+        [finalItemId]
+      );
+
+      if (activoRes.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({
+          success: false,
+          message: `Activo con placa ${finalItemId} no encontrado.`
+        });
+      }
+
+      const activoActual = activoRes.rows[0];
+
+      const prestamoRes = await client.query(
+        `INSERT INTO prestamos (
+            placa_activo,
+            tipo_item,
+            cantidad,
+            solicitante,
+            sede,
+            motivo,
+            fecha_salida,
+            fecha_devolucion_esperada,
+            estado
+          )
+          VALUES ($1, 'activo', 1, $2, $3, $4, COALESCE($5::date, CURRENT_DATE), $6, 'Activo')
+          RETURNING *`,
+        [
+          activoActual.placa,
+          finalSolicitante,
+          sede,
+          motivo,
+          fecha_salida || null,
+          finalFechaDevolucion
+        ]
+      );
+
+      await client.query(
+        `UPDATE activos
+          SET estado = 'En campo',
+              custodio = $1,
+              fecha_devolucion = $2
+          WHERE placa = $3`,
+        [finalSolicitante, finalFechaDevolucion, activoActual.placa]
+      );
+
+      prestamoInsertado = prestamoRes.rows[0];
+      prestamoInsertado.nombre_activo = activoActual.nombre;
+    }
 
     await client.query('COMMIT');
 
     res.status(201).json({
       success: true,
-      message: 'Préstamo registrado exitosamente y activo actualizado',
-      data: prestamoRes.rows[0]
+      message: 'Préstamo registrado exitosamente y stock/activo actualizado',
+      data: prestamoInsertado
     });
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('Error al crear préstamo:', error.message);
+    console.error('Error al crear préstamo en DB:', error);
     res.status(500).json({ success: false, error: error.message });
   } finally {
     client.release();
   }
 });
 
-// PUT /api/prestamos/:id/devolver - Marca préstamo como devuelto y restaura activo
+// PUT /api/prestamos/:id/devolver - Marca préstamo como devuelto y restaura activo o stock de consumible
 router.put('/prestamos/:id/devolver', async (req, res, next) => {
   const client = await pool.connect();
   try {
@@ -499,34 +730,50 @@ router.put('/prestamos/:id/devolver', async (req, res, next) => {
 
     const prestamo = prestamoRes.rows[0];
 
+    if (prestamo.estado === 'Devuelto') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success: false, message: 'Este préstamo ya fue marcado como devuelto previamente.' });
+    }
+
     const updatedPrestamoRes = await client.query(
       `UPDATE prestamos
-       SET estado = 'Devuelto',
-           fecha_devolucion_real = CURRENT_DATE
-       WHERE id = $1
-       RETURNING *`,
+         SET estado = 'Devuelto',
+             fecha_devolucion_real = CURRENT_DATE
+         WHERE id = $1
+         RETURNING *`,
       [id]
     );
 
-    await client.query(
-      `UPDATE activos
-       SET estado = 'Disponible',
-           custodio = NULL,
-           fecha_devolucion = NULL
-       WHERE LOWER(placa) = LOWER($1)`,
-      [prestamo.placa_activo]
-    );
+    const esConsumible = prestamo.tipo_item === 'consumible' ||
+      (prestamo.placa_activo && (prestamo.placa_activo.toUpperCase().startsWith('ROB') || prestamo.placa_activo.toUpperCase().startsWith('MAT')));
+
+    if (esConsumible) {
+      const cantRestaurar = Math.max(1, prestamo.cantidad || 1);
+      await client.query(
+        'UPDATE consumibles SET disponible = disponible + $1 WHERE LOWER(id) = LOWER($2)',
+        [cantRestaurar, prestamo.placa_activo]
+      );
+    } else {
+      await client.query(
+        `UPDATE activos
+           SET estado = 'Disponible',
+               custodio = NULL,
+               fecha_devolucion = NULL
+           WHERE LOWER(placa) = LOWER($1)`,
+        [prestamo.placa_activo]
+      );
+    }
 
     await client.query('COMMIT');
 
     res.json({
       success: true,
-      message: 'Préstamo marcado como devuelto y activo disponible nuevamente',
+      message: 'Préstamo marcado como devuelto y existencias/activo restablecido',
       data: updatedPrestamoRes.rows[0]
     });
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('Error al devolver préstamo:', error.message);
+    console.error('Error al devolver préstamo:', error);
     res.status(500).json({ success: false, error: error.message });
   } finally {
     client.release();

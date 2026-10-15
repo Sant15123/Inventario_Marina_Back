@@ -72,6 +72,7 @@ export const initDb = async () => {
         fecha_vencimiento_garantia DATE,
         claves_otros TEXT,
         observaciones TEXT,
+        ubicacion_estante VARCHAR(255),
         created_at TIMESTAMP DEFAULT NOW()
       );
     `);
@@ -84,6 +85,7 @@ export const initDb = async () => {
         disponible INT DEFAULT 0,
         minimo INT DEFAULT 0,
         ubicacion VARCHAR(100),
+        ubicacion_estante VARCHAR(255),
         created_at TIMESTAMP DEFAULT NOW()
       );
     `);
@@ -91,7 +93,9 @@ export const initDb = async () => {
     await client.query(`
       CREATE TABLE IF NOT EXISTS prestamos (
         id SERIAL PRIMARY KEY,
-        placa_activo VARCHAR(100) REFERENCES activos(placa) ON UPDATE CASCADE,
+        placa_activo VARCHAR(100),
+        tipo_item VARCHAR(50) DEFAULT 'activo',
+        cantidad INT DEFAULT 1,
         solicitante VARCHAR(255) NOT NULL,
         sede VARCHAR(100) NOT NULL,
         motivo VARCHAR(255),
@@ -99,6 +103,22 @@ export const initDb = async () => {
         fecha_devolucion_esperada DATE NOT NULL,
         fecha_devolucion_real DATE,
         estado VARCHAR(50) DEFAULT 'Activo'
+      );
+
+      ALTER TABLE prestamos DROP CONSTRAINT IF EXISTS prestamos_placa_activo_fkey;
+      ALTER TABLE prestamos ADD COLUMN IF NOT EXISTS tipo_item VARCHAR(50) DEFAULT 'activo';
+      ALTER TABLE prestamos ADD COLUMN IF NOT EXISTS cantidad INT DEFAULT 1;
+
+      CREATE TABLE IF NOT EXISTS entregas_consumibles (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        material_id VARCHAR(50),
+        material_nombre VARCHAR(150),
+        cantidad INTEGER NOT NULL,
+        responsable VARCHAR(150) NOT NULL,
+        sede VARCHAR(150),
+        proyecto_motivo TEXT,
+        tipo VARCHAR(50) DEFAULT 'Consumido',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
     `);
 
