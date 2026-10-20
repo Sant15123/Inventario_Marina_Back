@@ -138,6 +138,22 @@ export const initDb = async () => {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
 
+      CREATE TABLE IF NOT EXISTS papeleria (
+        id VARCHAR(50) PRIMARY KEY,
+        material VARCHAR(200) NOT NULL,
+        descripcion TEXT,
+        disponible INTEGER NOT NULL DEFAULT 0,
+        minimo INTEGER DEFAULT 5,
+        sede VARCHAR(100) DEFAULT 'Oficina FMO',
+        ubicacion_estante VARCHAR(100),
+        condicion VARCHAR(50) DEFAULT 'Nuevos',
+        estado VARCHAR(50) DEFAULT 'Bueno',
+        observaciones TEXT,
+        responsable VARCHAR(150),
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
       ALTER TABLE activos ADD COLUMN IF NOT EXISTS tipo_inventario VARCHAR(50) DEFAULT 'tecnologia';
       ALTER TABLE activos ADD COLUMN IF NOT EXISTS custodio_documento VARCHAR(50);
       ALTER TABLE activos ADD COLUMN IF NOT EXISTS usuario_id UUID;

@@ -1182,18 +1182,60 @@ router.get('/consecutivos/:tipo', async (req, res) => {
     }
 
     if (tipo === 'papeleria') {
-      // Formato PAP{n+1} con 4 dígitos
-      const papResult = await pool.query(`
-        SELECT COALESCE(MAX(NULLIF(regexp_replace(id, '^[^0-9]*', '', 'g'), '')::int), 0) AS max_num
-        FROM consumibles
-        WHERE id ~* '^PAP[0-9]+$'
+      const caja = (req.query.caja || req.query.ubicacion_estante || '').trim();
+      let cajaNum = null;
+      const matchCaja = caja.match(/(\d+)/);
+      if (matchCaja) {
+        cajaNum = parseInt(matchCaja[1], 10);
+      }
+
+      if (cajaNum !== null && !isNaN(cajaNum) && cajaNum > 0) {
+        // Formato Pape{caja}XXX (ej. Pape1001, Pape2001, Pape3001)
+        const prefix = `Pape${cajaNum}`;
+        const papCajaResult = await pool.query(`
+          SELECT id FROM papeleria WHERE id ~* '^${prefix}[0-9]+$'
+        `);
+        
+        let maxSuffix = 0;
+        for (const row of papCajaResult.rows) {
+          const numPart = parseInt(row.id.replace(new RegExp(`^${prefix}`, 'i'), ''), 10);
+          if (!isNaN(numPart) && numPart > maxSuffix) {
+            maxSuffix = numPart;
+          }
+        }
+        const nextNum = maxSuffix + 1;
+        const paddedSuffix = String(nextNum).padStart(3, '0');
+        const siguienteCodigo = `${prefix}${paddedSuffix}`;
+
+        return res.json({
+          success: true,
+          tipo: 'papeleria',
+          caja: `CAJA #${cajaNum}`,
+          siguiente_codigo: siguienteCodigo,
+          numero: nextNum
+        });
+      }
+
+      // Si no se especifica caja, calcular el máximo consecutivo de 4 dígitos (ej. Pape1231 -> Pape1232 o mayor)
+      const allPapeResult = await pool.query(`
+        SELECT id FROM papeleria WHERE id ~* '^Pape[0-9]+$'
       `);
-      const nextNum = (parseInt(papResult.rows[0]?.max_num, 10) || 0) + 1;
-      const padded = String(nextNum).padStart(4, '0');
+
+      let maxTotal = 0;
+      for (const row of allPapeResult.rows) {
+        const numPart = parseInt(row.id.replace(/^Pape/i, ''), 10);
+        if (!isNaN(numPart) && numPart > maxTotal) {
+          maxTotal = numPart;
+        }
+      }
+
+      const nextNum = maxTotal > 0 ? maxTotal + 1 : 1001;
+      const siguienteCodigo = `Pape${String(nextNum).padStart(4, '0')}`;
+
       return res.json({
         success: true,
         tipo: 'papeleria',
-        siguiente_codigo: `PAP${padded}`,
+        siguiente_codigo: siguienteCodigo,
         numero: nextNum
       });
     }
@@ -1222,6 +1264,331 @@ router.get('/consecutivos/:tipo', async (req, res) => {
   } catch (error) {
     console.error('Error calculando consecutivo:', error.message);
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ==========================================
+// 6. ENDPOINTS DE PAPELERÍA INSTITUCIONAL
+// ==========================================
+
+// GET /api/papeleria - Listar insumos con filtros y búsqueda
+router.get('/papeleria', async (req, res) => {
+  try {
+    const { ubicacion_estante, caja, search, estado, condicion, sede } = req.query;
+
+    let query = 'SELECT * FROM papeleria WHERE 1=1';
+    const params = [];
+
+    const targetCaja = ubicacion_estante || caja;
+    if (targetCaja) {
+      params.push(`%${targetCaja.trim().toLowerCase()}%`);
+      query += ` AND LOWER(ubicacion_estante) LIKE $${params.length}`;
+    }
+
+    if (sede) {
+      params.push(`%${sede.trim().toLowerCase()}%`);
+      query += ` AND LOWER(sede) LIKE $${params.length}`;
+    }
+
+    if (estado) {
+      params.push(estado.trim().toLowerCase());
+      query += ` AND LOWER(estado) = $${params.length}`;
+    }
+
+    if (condicion) {
+      params.push(condicion.trim().toLowerCase());
+      query += ` AND LOWER(condicion) = $${params.length}`;
+    }
+
+    if (search) {
+      params.push(`%${search.trim().toLowerCase()}%`);
+      query += ` AND (LOWER(id) LIKE $${params.length} OR LOWER(material) LIKE $${params.length} OR LOWER(descripcion) LIKE $${params.length} OR LOWER(ubicacion_estante) LIKE $${params.length})`;
+    }
+
+    query += ' ORDER BY id ASC';
+
+    const result = await pool.query(query, params);
+    res.json({ success: true, count: result.rows.length, data: result.rows || [] });
+  } catch (error) {
+    console.error('Error al listar papelería:', error.message);
+    res.status(500).json({ success: false, data: [], error: error.message });
+  }
+});
+
+// GET /api/papeleria/:id - Detalle de un insumo de papelería
+router.get('/papeleria/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query('SELECT * FROM papeleria WHERE LOWER(id) = LOWER($1)', [id.trim()]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, message: `Insumo de papelería con código "${id}" no encontrado.` });
+    }
+
+    res.json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    console.error('Error al consultar insumo de papelería:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/papeleria - Creación de nuevo insumo de papelería
+router.post('/papeleria', async (req, res) => {
+  try {
+    const {
+      id,
+      material,
+      descripcion,
+      disponible = 0,
+      minimo = 5,
+      sede = 'Oficina FMO',
+      ubicacion_estante,
+      caja,
+      condicion = 'Nuevos',
+      estado = 'Bueno',
+      observaciones,
+      responsable
+    } = req.body;
+
+    if (!material || !material.trim()) {
+      return res.status(400).json({ success: false, message: 'El nombre del material es obligatorio.' });
+    }
+
+    const finalUbicacion = ubicacion_estante || caja || 'Fuera de cajas';
+
+    // Si no viene id, calcular autoconsecutivo
+    let finalId = (id || '').trim();
+    if (!finalId) {
+      let cajaNum = null;
+      const matchCaja = finalUbicacion.match(/(\d+)/);
+      if (matchCaja) cajaNum = parseInt(matchCaja[1], 10);
+
+      if (cajaNum !== null && !isNaN(cajaNum) && cajaNum > 0) {
+        const prefix = `Pape${cajaNum}`;
+        const checkRes = await pool.query(`SELECT id FROM papeleria WHERE id ~* '^${prefix}[0-9]+$'`);
+        let maxSuffix = 0;
+        for (const row of checkRes.rows) {
+          const numPart = parseInt(row.id.replace(new RegExp(`^${prefix}`, 'i'), ''), 10);
+          if (!isNaN(numPart) && numPart > maxSuffix) maxSuffix = numPart;
+        }
+        finalId = `${prefix}${String(maxSuffix + 1).padStart(3, '0')}`;
+      } else {
+        const allRes = await pool.query(`SELECT id FROM papeleria WHERE id ~* '^Pape[0-9]+$'`);
+        let maxTotal = 0;
+        for (const row of allRes.rows) {
+          const numPart = parseInt(row.id.replace(/^Pape/i, ''), 10);
+          if (!isNaN(numPart) && numPart > maxTotal) maxTotal = numPart;
+        }
+        finalId = `Pape${String((maxTotal > 0 ? maxTotal : 1000) + 1).padStart(4, '0')}`;
+      }
+    }
+
+    const query = `
+      INSERT INTO papeleria (
+        id, material, descripcion, disponible, minimo, sede,
+        ubicacion_estante, condicion, estado, observaciones, responsable
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      RETURNING *;
+    `;
+
+    const values = [
+      finalId,
+      material.trim(),
+      descripcion ? descripcion.trim() : null,
+      Math.max(0, parseInt(disponible, 10) || 0),
+      Math.max(0, parseInt(minimo, 10) || 5),
+      sede || 'Oficina FMO',
+      finalUbicacion,
+      condicion || 'Nuevos',
+      estado || 'Bueno',
+      observaciones ? observaciones.trim() : null,
+      responsable ? responsable.trim() : null
+    ];
+
+    const result = await pool.query(query, values);
+
+    res.status(201).json({
+      success: true,
+      message: 'Insumo de papelería registrado exitosamente.',
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error al registrar papelería:', error.message);
+    if (error.code === '23505') {
+      return res.status(409).json({ success: false, message: 'Ya existe un insumo de papelería con este código (id).' });
+    }
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// PUT /api/papeleria/:id - Actualización de ficha técnica, cantidades y ubicación física
+router.put('/api/papeleria/:id', async (req, res) => {
+  // Manejador delegando al handler principal
+  return handleUpdatePapeleria(req, res);
+});
+
+router.put('/papeleria/:id', async (req, res) => {
+  return handleUpdatePapeleria(req, res);
+});
+
+const handleUpdatePapeleria = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      material,
+      descripcion,
+      disponible,
+      minimo,
+      sede,
+      ubicacion_estante,
+      caja,
+      condicion,
+      estado,
+      observaciones,
+      responsable
+    } = req.body;
+
+    const finalUbi = ubicacion_estante !== undefined ? ubicacion_estante : (caja !== undefined ? caja : null);
+
+    const query = `
+      UPDATE papeleria
+      SET
+        material = COALESCE($1, material),
+        descripcion = COALESCE($2, descripcion),
+        disponible = COALESCE($3, disponible),
+        minimo = COALESCE($4, minimo),
+        sede = COALESCE($5, sede),
+        ubicacion_estante = COALESCE($6, ubicacion_estante),
+        condicion = COALESCE($7, condicion),
+        estado = COALESCE($8, estado),
+        observaciones = COALESCE($9, observaciones),
+        responsable = COALESCE($10, responsable),
+        updated_at = NOW()
+      WHERE LOWER(id) = LOWER($11)
+      RETURNING *;
+    `;
+
+    const values = [
+      material !== undefined ? material.trim() : null,
+      descripcion !== undefined ? descripcion : null,
+      disponible !== undefined && disponible !== '' ? parseInt(disponible, 10) : null,
+      minimo !== undefined && minimo !== '' ? parseInt(minimo, 10) : null,
+      sede !== undefined ? sede : null,
+      finalUbi,
+      condicion !== undefined ? condicion : null,
+      estado !== undefined ? estado : null,
+      observaciones !== undefined ? observaciones : null,
+      responsable !== undefined ? responsable : null,
+      id.trim()
+    ];
+
+    const result = await pool.query(query, values);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, message: `Insumo con código "${id}" no encontrado para actualizar.` });
+    }
+
+    res.json({
+      success: true,
+      message: 'Insumo de papelería actualizado exitosamente.',
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error al actualizar papelería:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// POST /api/papeleria/salida - Descontar stock e integrar con actas/remisiones de entrega
+router.post('/papeleria/salida', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const {
+      material_id,
+      item_id,
+      cantidad = 1,
+      responsable,
+      person,
+      responsable_documento,
+      sede = 'Oficina FMO',
+      proyecto_motivo,
+      motivo = 'Salida de papelería para capacitación / aula',
+      remision_id
+    } = req.body;
+
+    const finalId = (material_id || item_id || '').trim();
+    const finalResponsable = (responsable || person || '').trim();
+    const finalCantidad = Math.max(1, parseInt(cantidad, 10) || 1);
+    const finalMotivo = (proyecto_motivo || motivo).trim();
+
+    if (!finalId || !finalResponsable) {
+      return res.status(400).json({
+        success: false,
+        message: 'El identificador del insumo (material_id) y el responsable son requeridos.'
+      });
+    }
+
+    await client.query('BEGIN');
+
+    // 1. Verificar insumo y bloquear fila
+    const papeRes = await client.query('SELECT * FROM papeleria WHERE LOWER(id) = LOWER($1) FOR UPDATE', [finalId]);
+
+    if (papeRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: `Insumo con código ${finalId} no encontrado en papelería.` });
+    }
+
+    const insumo = papeRes.rows[0];
+    const stockActual = parseInt(insumo.disponible, 10) || 0;
+
+    if (stockActual < finalCantidad) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        success: false,
+        message: `Stock insuficiente para ${insumo.material}. Solicitado: ${finalCantidad}, Disponible: ${stockActual}`
+      });
+    }
+
+    // 2. Descontar stock de papelería
+    const updatedPapeRes = await client.query(
+      'UPDATE papeleria SET disponible = disponible - $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+      [finalCantidad, insumo.id]
+    );
+
+    // 3. Registrar en tabla histórica de entregas (entregas_consumibles)
+    const entregaRes = await client.query(`
+      INSERT INTO entregas_consumibles (
+        material_id, material_nombre, cantidad, responsable,
+        responsable_documento, sede, proyecto_motivo, tipo, remision_id, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'Consumido Papelería', $8, NOW())
+      RETURNING *
+    `, [
+      insumo.id,
+      insumo.material,
+      finalCantidad,
+      finalResponsable,
+      responsable_documento || null,
+      sede,
+      finalMotivo,
+      remision_id || null
+    ]);
+
+    await client.query('COMMIT');
+
+    res.status(201).json({
+      success: true,
+      message: `Salida de papelería registrada: se descontaron ${finalCantidad} unidad(es) de ${insumo.material}.`,
+      data: {
+        insumo_actualizado: updatedPapeRes.rows[0],
+        entrega_registrada: entregaRes.rows[0]
+      }
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error al registrar salida de papelería:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  } finally {
+    client.release();
   }
 });
 

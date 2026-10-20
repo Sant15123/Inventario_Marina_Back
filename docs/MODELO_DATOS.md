@@ -10,6 +10,7 @@ erDiagram
     ACTIVOS ||--o{ PRESTAMOS : "prestado en"
     CONSUMIBLES ||--o{ PRESTAMOS : "prestado temporalmente"
     CONSUMIBLES ||--o{ ENTREGAS_CONSUMIBLES : "salida definitiva de"
+    PAPELERIA ||--o{ ENTREGAS_CONSUMIBLES : "salida definitiva de"
 
     PERFILES {
         uuid id PK
@@ -43,9 +44,9 @@ erDiagram
     }
 
     CONSUMIBLES {
-        string id PK,UK "RobXXXX, PAPXXXX"
+        string id PK,UK "RobXXXX"
         string material
-        string tipo_inventario "robotica, papeleria"
+        string tipo_inventario "robotica"
         string categoria
         integer disponible
         integer minimo
@@ -53,6 +54,21 @@ erDiagram
         string ubicacion_estante
         string estado
         string condicion
+    }
+
+    PAPELERIA {
+        string id PK,UK "PapeXXXX (Pape1001, Pape2001...)"
+        string material
+        string descripcion
+        integer disponible
+        integer minimo
+        string sede
+        string ubicacion_estante "CAJA #1 a #11, Fuera de cajas"
+        string condicion "Nuevos, Usados, Mixto"
+        string estado "Bueno, Regular"
+        string responsable
+        string observaciones
+        timestamptz created_at
     }
 
     PRESTAMOS {
@@ -81,7 +97,7 @@ erDiagram
         uuid usuario_id FK
         string sede
         string proyecto_motivo
-        string tipo
+        string tipo "Consumido, Consumido Papelería"
         timestamptz created_at
     }
 ```
@@ -98,14 +114,15 @@ erDiagram
 | **ACTIVOS** | `serial` | Unique Index Condicional | Serial de fábrica único por activo físico (excluyendo vacíos, `S/N`, `N/A`). |
 | **ACTIVOS** | `tipo_inventario` | Check / Default | Dominio: `'tecnologia'`, `'mobiliario'`. |
 | **ACTIVOS** | `ubicacion_estante` | VARCHAR | Estante, caja, gaveta o armario físico. |
-| **CONSUMIBLES** | `id` | Primary Key (`PK`, `UK`) | Código alfanumérico identificador (`Rob{n+1}` para robótica, `PAP{n+1}` para papelería). |
-| **CONSUMIBLES** | `tipo_inventario` | Check / Default | Dominio: `'robotica'`, `'papeleria'`. |
-| **CONSUMIBLES** | `disponible` | Check Constraint | `disponible >= 0` (Control atómico de stock). |
+| **CONSUMIBLES** | `id` | Primary Key (`PK`, `UK`) | Código alfanumérico identificador (`Rob{n+1}` para robótica). |
+| **PAPELERIA** | `id` | Primary Key (`PK`, `UK`) | Código institucional `PapeXXXX` (ej. `Pape1001` - Caja 1, `Pape2001` - Caja 2). |
+| **PAPELERIA** | `ubicacion_estante` | VARCHAR(100) | Caja contenedora física (`CAJA #1` a `CAJA #11`, `Fuera de cajas`). |
+| **PAPELERIA** | `disponible` | Check Constraint | `disponible >= 0` (Control atómico de existencias). |
 | **PRESTAMOS** | `id` | Primary Key (`PK`, `SERIAL`) | Identificador del préstamo. |
 | **PRESTAMOS** | `placa_activo` | Reference | Código de activo o consumible prestado. |
 | **PRESTAMOS** | `solicitante_documento`| Reference / Lookup | Vínculo con `PERFILES(documento)`. |
 | **ENTREGAS_CONSUMIBLES** | `id` | Primary Key (`PK`, `UUID`) | Identificador único de salida definitiva. |
-| **ENTREGAS_CONSUMIBLES** | `material_id` | Foreign Key $\rightarrow$ `CONSUMIBLES(id)` | Insumo entregado. |
+| **ENTREGAS_CONSUMIBLES** | `material_id` | Foreign Key $\rightarrow$ `CONSUMIBLES(id)` / `PAPELERIA(id)` | Insumo entregado. |
 | **ENTREGAS_CONSUMIBLES** | `responsable_documento` | Reference / Lookup | Vínculo con `PERFILES(documento)`. |
 
 ---
@@ -115,3 +132,4 @@ erDiagram
 1. **`admin_all_perfiles`:** Acceso total (`SELECT`, `INSERT`, `UPDATE`, `DELETE`) para usuarios con rol `'administrador'`.
 2. **`staff_select_perfiles`:** Permisos de solo lectura (`SELECT`) para usuarios con rol `'supervisor'` y `'operador'`.
 3. **`user_own_perfil`:** Los usuarios con rol `'usuario'` solo pueden consultar y actualizar su propio perfil (`id = auth.uid()` o coincidencia de correo).
+4. **`Acceso completo a papeleria`:** `CREATE POLICY "Acceso completo a papeleria" ON public.papeleria FOR ALL TO public USING (true) WITH CHECK (true);`
