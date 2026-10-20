@@ -488,6 +488,19 @@ router.put('/consumibles/:id', async (req, res) => {
 // 2.1 ENTREGAS / SALIDAS DE CONSUMIBLES
 // ==========================================
 
+// GET /api/consumibles/remisiones - Listar actas/remisiones de entregas de consumibles
+router.get('/consumibles/remisiones', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM remisiones_consumibles ORDER BY created_at DESC'
+    );
+    res.json({ success: true, data: result.rows || [] });
+  } catch (error) {
+    console.error('Error al listar remisiones de consumibles:', error.message);
+    res.status(500).json({ success: false, data: [], error: error.message });
+  }
+});
+
 // GET /api/consumibles/entregas - Listar entregas de consumibles realizadas
 router.get('/consumibles/entregas', async (req, res) => {
   try {
