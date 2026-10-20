@@ -408,6 +408,10 @@ router.put('/consumibles/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const {
+      nuevo_id,
+      id: bodyId,
+      placa,
+      codigo,
       material,
       categoria,
       disponible,
@@ -425,29 +429,42 @@ router.put('/consumibles/:id', async (req, res) => {
       tipo_inventario
     } = req.body;
 
+    const targetId = (nuevo_id || bodyId || placa || codigo || '').trim();
+    const finalId = targetId || id;
+
+    // Si cambió la placa / código / id, verificar que no colisione con otro consumible existente
+    if (targetId && targetId.toLowerCase() !== id.toLowerCase()) {
+      const checkDup = await pool.query('SELECT id FROM consumibles WHERE LOWER(id) = LOWER($1)', [targetId]);
+      if (checkDup.rows.length > 0) {
+        return res.status(400).json({ success: false, message: `La placa o código "${targetId}" ya existe en consumibles.` });
+      }
+    }
+
     const query = `
       UPDATE consumibles
       SET 
-        material = COALESCE($1, material),
-        categoria = COALESCE($2, categoria),
-        disponible = COALESCE($3, disponible),
-        minimo = COALESCE($4, minimo),
-        ubicacion = COALESCE($5, ubicacion),
-        descripcion = $6,
-        caracteristicas = $7,
-        estado = COALESCE($8, estado),
-        condicion = COALESCE($9, condicion),
-        observaciones = $10,
-        valor_compra = $11,
-        fecha_compra = $12,
-        fecha_vencimiento_garantia = $13,
-        ubicacion_estante = COALESCE($14, ubicacion_estante),
-        tipo_inventario = COALESCE($15, tipo_inventario)
-      WHERE LOWER(id) = LOWER($16)
+        id = COALESCE($1, id),
+        material = COALESCE($2, material),
+        categoria = COALESCE($3, categoria),
+        disponible = COALESCE($4, disponible),
+        minimo = COALESCE($5, minimo),
+        ubicacion = COALESCE($6, ubicacion),
+        descripcion = $7,
+        caracteristicas = $8,
+        estado = COALESCE($9, estado),
+        condicion = COALESCE($10, condicion),
+        observaciones = $11,
+        valor_compra = $12,
+        fecha_compra = $13,
+        fecha_vencimiento_garantia = $14,
+        ubicacion_estante = COALESCE($15, ubicacion_estante),
+        tipo_inventario = COALESCE($16, tipo_inventario)
+      WHERE LOWER(id) = LOWER($17)
       RETURNING *;
     `;
 
     const values = [
+      finalId,
       material,
       categoria,
       disponible !== undefined ? parseInt(disponible) : undefined,
@@ -470,6 +487,16 @@ router.put('/consumibles/:id', async (req, res) => {
 
     if (result.rowCount === 0) {
       return res.status(404).json({ success: false, message: 'Consumible no encontrado' });
+    }
+
+    // Si se modificó la placa / id, sincronizar tablas auxiliares (entregas y préstamos)
+    if (targetId && targetId.toLowerCase() !== id.toLowerCase()) {
+      try {
+        await pool.query('UPDATE entregas_consumibles SET material_id = $1 WHERE LOWER(material_id) = LOWER($2)', [targetId, id]);
+        await pool.query('UPDATE prestamos SET placa_activo = $1 WHERE LOWER(placa_activo) = LOWER($2)', [targetId, id]);
+      } catch (errSync) {
+        console.warn('Advertencia no crítica al sincronizar tablas auxiliares:', errSync.message);
+      }
     }
 
     res.json({
@@ -1448,11 +1475,16 @@ const handleUpdatePapeleria = async (req, res) => {
   try {
     const { id } = req.params;
     const {
+      nuevo_id,
+      id: bodyId,
+      placa,
+      codigo,
       material,
       descripcion,
       disponible,
       minimo,
       sede,
+      ubicacion,
       ubicacion_estante,
       caja,
       condicion,
@@ -1461,32 +1493,46 @@ const handleUpdatePapeleria = async (req, res) => {
       responsable
     } = req.body;
 
+    const targetId = (nuevo_id || bodyId || placa || codigo || '').trim();
+    const finalId = targetId || id;
+
+    // Si cambió la placa / código / id, verificar que no colisione con otro
+    if (targetId && targetId.toLowerCase() !== id.toLowerCase()) {
+      const checkDup = await pool.query('SELECT id FROM papeleria WHERE LOWER(id) = LOWER($1)', [targetId]);
+      if (checkDup.rows.length > 0) {
+        return res.status(400).json({ success: false, message: `La placa o código "${targetId}" ya existe en papelería.` });
+      }
+    }
+
     const finalUbi = ubicacion_estante !== undefined ? ubicacion_estante : (caja !== undefined ? caja : null);
+    const finalSede = sede !== undefined ? sede : (ubicacion !== undefined ? ubicacion : null);
 
     const query = `
       UPDATE papeleria
       SET
-        material = COALESCE($1, material),
-        descripcion = COALESCE($2, descripcion),
-        disponible = COALESCE($3, disponible),
-        minimo = COALESCE($4, minimo),
-        sede = COALESCE($5, sede),
-        ubicacion_estante = COALESCE($6, ubicacion_estante),
-        condicion = COALESCE($7, condicion),
-        estado = COALESCE($8, estado),
-        observaciones = COALESCE($9, observaciones),
-        responsable = COALESCE($10, responsable),
+        id = COALESCE($1, id),
+        material = COALESCE($2, material),
+        descripcion = COALESCE($3, descripcion),
+        disponible = COALESCE($4, disponible),
+        minimo = COALESCE($5, minimo),
+        sede = COALESCE($6, sede),
+        ubicacion_estante = COALESCE($7, ubicacion_estante),
+        condicion = COALESCE($8, condicion),
+        estado = COALESCE($9, estado),
+        observaciones = COALESCE($10, observaciones),
+        responsable = COALESCE($11, responsable),
         updated_at = NOW()
-      WHERE LOWER(id) = LOWER($11)
+      WHERE LOWER(id) = LOWER($12)
       RETURNING *;
     `;
 
     const values = [
+      finalId,
       material !== undefined ? material.trim() : null,
       descripcion !== undefined ? descripcion : null,
       disponible !== undefined && disponible !== '' ? parseInt(disponible, 10) : null,
       minimo !== undefined && minimo !== '' ? parseInt(minimo, 10) : null,
-      sede !== undefined ? sede : null,
+      finalSede,
       finalUbi,
       condicion !== undefined ? condicion : null,
       estado !== undefined ? estado : null,
@@ -1499,6 +1545,14 @@ const handleUpdatePapeleria = async (req, res) => {
 
     if (result.rows.length === 0) {
       return res.status(404).json({ success: false, message: `Insumo con código "${id}" no encontrado para actualizar.` });
+    }
+
+    if (targetId && targetId.toLowerCase() !== id.toLowerCase()) {
+      try {
+        await pool.query('UPDATE entregas_consumibles SET material_id = $1 WHERE LOWER(material_id) = LOWER($2)', [targetId, id]);
+      } catch (errSync) {
+        console.warn('Advertencia al sincronizar entregas_consumibles:', errSync.message);
+      }
     }
 
     res.json({
