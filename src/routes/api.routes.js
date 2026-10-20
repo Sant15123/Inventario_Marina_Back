@@ -51,16 +51,59 @@ router.post('/activos', async (req, res, next) => {
       estado = 'Disponible',
       custodio = null,
       fecha_devolucion = null,
-      ubicacion_estante = null
+      ubicacion_estante = null,
+      tipo_inventario = 'tecnologia',
+      categoria = 'Portátiles',
+      condicion = 'Nuevo',
+      area = 'Tecnología',
+      ubicacion = 'Oficina Medellín',
+      cantidad = 1,
+      descripcion = null,
+      caracteristica_1 = null,
+      caracteristica_2 = null,
+      caracteristica_3 = null,
+      responsable = null,
+      proveedor = null,
+      valor_compra = null,
+      valor_total = null,
+      fecha_compra = null,
+      fecha_vencimiento_garantia = null,
+      claves_otros = null,
+      observaciones = null,
+      custodio_documento = null,
+      usuario_id = null
     } = req.body;
 
     if (!placa || !nombre) {
       return res.status(400).json({ success: false, message: 'La placa y el nombre son obligatorios.' });
     }
 
+    // Normalizar tipo_inventario según categoría si no se especifica explícitamente
+    let finalTipoInventario = (tipo_inventario || 'tecnologia').toLowerCase();
+    const catLower = (categoria || '').toLowerCase();
+    if (catLower.includes('papeler') || catLower.includes('oficina')) {
+      finalTipoInventario = 'papeleria';
+    } else if (catLower.includes('mobil') || catLower.includes('mueble') || catLower.includes('silla') || catLower.includes('mesa') || catLower.includes('estante')) {
+      finalTipoInventario = 'mobiliario';
+    } else if (catLower.includes('robotic') || catLower.includes('sensor')) {
+      finalTipoInventario = 'robotica';
+    }
+
     const result = await pool.query(
-      `INSERT INTO activos (placa, nombre, marca, modelo, serial, sede, estado, custodio, fecha_devolucion, ubicacion_estante)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `INSERT INTO activos (
+        placa, nombre, marca, modelo, serial, sede, estado, custodio, fecha_devolucion,
+        ubicacion_estante, tipo_inventario, categoria, condicion, area, ubicacion, cantidad,
+        descripcion, caracteristica_1, caracteristica_2, caracteristica_3, responsable,
+        proveedor, valor_compra, valor_total, fecha_compra, fecha_vencimiento_garantia,
+        claves_otros, observaciones, custodio_documento, usuario_id
+       )
+       VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9,
+        $10, $11, $12, $13, $14, $15, $16,
+        $17, $18, $19, $20, $21,
+        $22, $23, $24, $25, $26,
+        $27, $28, $29, $30
+       )
        RETURNING *`,
       [
         placa.trim(),
@@ -70,9 +113,29 @@ router.post('/activos', async (req, res, next) => {
         serial ? serial.trim() : null,
         sede,
         estado,
-        custodio,
+        custodio || responsable || null,
         fecha_devolucion,
-        ubicacion_estante || null
+        ubicacion_estante || null,
+        finalTipoInventario,
+        categoria || 'Portátiles',
+        condicion || 'Nuevo',
+        area || 'Tecnología',
+        ubicacion || 'Oficina Medellín',
+        parseInt(cantidad, 10) || 1,
+        descripcion || null,
+        caracteristica_1 || null,
+        caracteristica_2 || null,
+        caracteristica_3 || null,
+        responsable || custodio || null,
+        proveedor || null,
+        valor_compra || null,
+        valor_total || null,
+        fecha_compra || null,
+        fecha_vencimiento_garantia || null,
+        claves_otros || null,
+        observaciones || null,
+        custodio_documento || null,
+        usuario_id || null
       ]
     );
 
@@ -127,7 +190,10 @@ const handleUpdateActivo = async (req, res, next) => {
       fecha_vencimiento_garantia,
       claves_otros,
       observaciones,
-      ubicacion_estante
+      ubicacion_estante,
+      tipo_inventario,
+      custodio_documento,
+      usuario_id
     } = req.body;
 
     const nombreFinal = nombre !== undefined ? nombre : (equipo !== undefined ? equipo : null);
@@ -164,8 +230,11 @@ const handleUpdateActivo = async (req, res, next) => {
         custodio = COALESCE($23, custodio),
         fecha_devolucion = COALESCE($24, fecha_devolucion),
         sede = COALESCE($25, sede),
-        ubicacion_estante = COALESCE($26, ubicacion_estante)
-      WHERE ${isNumericId ? '(id = $27 OR LOWER(placa) = LOWER($28))' : 'LOWER(placa) = LOWER($27)'}
+        ubicacion_estante = COALESCE($26, ubicacion_estante),
+        tipo_inventario = COALESCE($27, tipo_inventario),
+        custodio_documento = COALESCE($28, custodio_documento),
+        usuario_id = COALESCE($29, usuario_id)
+      WHERE ${isNumericId ? '(id = $30 OR LOWER(placa) = LOWER($31))' : 'LOWER(placa) = LOWER($30)'}
       RETURNING *;
     `;
 
@@ -179,25 +248,28 @@ const handleUpdateActivo = async (req, res, next) => {
       descripcion !== undefined ? descripcion : null,
       marca !== undefined ? marca : null,
       modelo !== undefined ? modelo : null,
-      serial !== undefined ? serial : null,
+      serial !== undefined ? (serial ? serial.trim() : null) : null,
       caracteristica_1 !== undefined ? caracteristica_1 : null,
       caracteristica_2 !== undefined ? caracteristica_2 : null,
       caracteristica_3 !== undefined ? caracteristica_3 : null,
       responsableFinal,
       proveedor !== undefined ? proveedor : null,
-      valor_compra !== undefined && valor_compra !== '' ? parseFloat(valor_compra) : null,
-      valor_total !== undefined && valor_total !== '' ? parseFloat(valor_total) : null,
-      fecha_compra ? fecha_compra : null,
-      fecha_vencimiento_garantia ? fecha_vencimiento_garantia : null,
+      valor_compra !== undefined && valor_compra !== '' ? valor_compra : null,
+      valor_total !== undefined && valor_total !== '' ? valor_total : null,
+      fecha_compra !== undefined && fecha_compra !== '' ? fecha_compra : null,
+      fecha_vencimiento_garantia !== undefined && fecha_vencimiento_garantia !== '' ? fecha_vencimiento_garantia : null,
       claves_otros !== undefined ? claves_otros : null,
       observaciones !== undefined ? observaciones : null,
       estado !== undefined ? estado : null,
-      responsableFinal,
-      fecha_devolucion ? fecha_devolucion : null,
-      ubicacionFinal,
+      custodio !== undefined ? custodio : null,
+      fecha_devolucion !== undefined && fecha_devolucion !== '' ? fecha_devolucion : null,
+      sede !== undefined ? sede : null,
       ubicacion_estante !== undefined ? ubicacion_estante : null,
-      isNumericId ? parseInt(paramId, 10) : paramId,
-      ...(isNumericId ? [paramId] : [])
+      tipo_inventario !== undefined ? tipo_inventario : null,
+      custodio_documento !== undefined ? custodio_documento : null,
+      usuario_id !== undefined ? usuario_id : null,
+      isNumericId ? parseInt(paramId, 10) : paramId.toLowerCase(),
+      ...(isNumericId ? [paramId.toLowerCase()] : [])
     ];
 
     const result = await pool.query(updateQuery, values);
@@ -267,7 +339,8 @@ router.post('/consumibles', async (req, res, next) => {
       valor_compra,
       fecha_compra,
       fecha_vencimiento_garantia,
-      ubicacion_estante
+      ubicacion_estante,
+      tipo_inventario
     } = req.body;
 
     // Validación básica de requeridos
@@ -278,12 +351,23 @@ router.post('/consumibles', async (req, res, next) => {
       });
     }
 
+    // Normalizar tipo_inventario según categoría si no se especifica
+    let finalTipoInventario = (tipo_inventario || 'robotica').toLowerCase();
+    const catLower = (categoria || '').toLowerCase();
+    if (catLower.includes('papeler') || catLower.includes('oficina')) {
+      finalTipoInventario = 'papeleria';
+    } else if (catLower.includes('mobil') || catLower.includes('mueble') || catLower.includes('silla') || catLower.includes('mesa') || catLower.includes('estante')) {
+      finalTipoInventario = 'mobiliario';
+    } else if (catLower.includes('tecnolog') || catLower.includes('laptop') || catLower.includes('pc') || catLower.includes('tablet')) {
+      finalTipoInventario = 'tecnologia';
+    }
+
     const query = `
       INSERT INTO consumibles (
         id, material, categoria, disponible, minimo, ubicacion,
         descripcion, caracteristicas, estado, condicion, observaciones,
-        valor_compra, fecha_compra, fecha_vencimiento_garantia, ubicacion_estante
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        valor_compra, fecha_compra, fecha_vencimiento_garantia, ubicacion_estante, tipo_inventario
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
       RETURNING *;
     `;
 
@@ -302,7 +386,8 @@ router.post('/consumibles', async (req, res, next) => {
       valor_compra || null,
       fecha_compra || null,
       fecha_vencimiento_garantia || null,
-      ubicacion_estante || null
+      ubicacion_estante || null,
+      finalTipoInventario
     ];
 
     const result = await pool.query(query, values);
@@ -336,7 +421,8 @@ router.put('/consumibles/:id', async (req, res) => {
       valor_compra,
       fecha_compra,
       fecha_vencimiento_garantia,
-      ubicacion_estante
+      ubicacion_estante,
+      tipo_inventario
     } = req.body;
 
     const query = `
@@ -355,8 +441,9 @@ router.put('/consumibles/:id', async (req, res) => {
         valor_compra = $11,
         fecha_compra = $12,
         fecha_vencimiento_garantia = $13,
-        ubicacion_estante = COALESCE($14, ubicacion_estante)
-      WHERE id = $15
+        ubicacion_estante = COALESCE($14, ubicacion_estante),
+        tipo_inventario = COALESCE($15, tipo_inventario)
+      WHERE LOWER(id) = LOWER($16)
       RETURNING *;
     `;
 
@@ -375,6 +462,7 @@ router.put('/consumibles/:id', async (req, res) => {
       fecha_compra || null,
       fecha_vencimiento_garantia || null,
       ubicacion_estante !== undefined ? ubicacion_estante : null,
+      tipo_inventario !== undefined ? tipo_inventario : null,
       id
     ];
 
@@ -777,6 +865,363 @@ router.put('/prestamos/:id/devolver', async (req, res, next) => {
     res.status(500).json({ success: false, error: error.message });
   } finally {
     client.release();
+  }
+});
+
+// ==========================================
+// 4. GESTIÓN DE USUARIOS Y PERFILES
+// ==========================================
+
+// GET /api/usuarios/mis-solicitudes - Solicitudes y préstamos del usuario autenticado
+router.get('/usuarios/mis-solicitudes', async (req, res) => {
+  try {
+    const documento = (req.query.documento || req.headers['x-user-documento'] || '').trim();
+    const usuarioId = (req.query.usuario_id || req.headers['x-user-id'] || '').trim();
+    const email = (req.query.email || req.headers['x-user-email'] || '').trim().toLowerCase();
+
+    if (!documento && !usuarioId && !email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Se requiere documento, usuario_id o email para consultar las solicitudes asociadas.'
+      });
+    }
+
+    // 1. Equipos en préstamo asignados al usuario
+    const prestamosQuery = `
+      SELECT p.*, a.nombre AS nombre_activo, a.marca, a.modelo, a.serial, a.categoria, a.tipo_inventario, a.ubicacion_estante
+      FROM prestamos p
+      LEFT JOIN activos a ON LOWER(a.placa) = LOWER(p.placa_activo)
+      WHERE p.estado = 'Activo'
+        AND (
+          ($1 <> '' AND (LOWER(p.solicitante_documento) = LOWER($1) OR LOWER(a.custodio_documento) = LOWER($1)))
+          OR ($2 <> '' AND (p.usuario_id::text = $2 OR a.usuario_id::text = $2))
+          OR ($3 <> '' AND LOWER(p.solicitante) LIKE '%' || $3 || '%')
+        )
+      ORDER BY p.fecha_salida DESC
+    `;
+
+    // 2. Consumibles entregados al usuario
+    const entregasQuery = `
+      SELECT e.*, c.categoria, c.tipo_inventario, c.ubicacion_estante
+      FROM entregas_consumibles e
+      LEFT JOIN consumibles c ON LOWER(c.id) = LOWER(e.material_id)
+      WHERE (
+        ($1 <> '' AND LOWER(e.responsable_documento) = LOWER($1))
+        OR ($2 <> '' AND e.usuario_id::text = $2)
+        OR ($3 <> '' AND LOWER(e.responsable) LIKE '%' || $3 || '%')
+      )
+      ORDER BY e.created_at DESC
+    `;
+
+    // Buscar si existe el nombre del usuario si tenemos documento
+    let searchName = '';
+    if (documento) {
+      const perfilRes = await pool.query('SELECT nombre_completo FROM perfiles WHERE documento = $1', [documento]);
+      if (perfilRes.rows.length > 0) {
+        searchName = perfilRes.rows[0].nombre_completo.toLowerCase();
+      }
+    }
+
+    const [prestamosRes, entregasRes] = await Promise.all([
+      pool.query(prestamosQuery, [documento, usuarioId, searchName]),
+      pool.query(entregasQuery, [documento, usuarioId, searchName])
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        prestamos_activos: prestamosRes.rows || [],
+        entregas_consumibles: entregasRes.rows || []
+      }
+    });
+  } catch (error) {
+    console.error('Error al consultar mis solicitudes:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/usuarios - Listar usuarios con filtros por rol y búsqueda
+router.get('/usuarios', async (req, res) => {
+  try {
+    const { rol, search, sede, activo } = req.query;
+
+    let query = 'SELECT id, documento, nombre_completo, telefono, email, rol, activo, sede, created_at, updated_at FROM perfiles WHERE 1=1';
+    const params = [];
+
+    if (rol) {
+      params.push(rol.toLowerCase());
+      query += ` AND LOWER(rol) = $${params.length}`;
+    }
+
+    if (sede) {
+      params.push(sede);
+      query += ` AND LOWER(sede) = LOWER($${params.length})`;
+    }
+
+    if (activo !== undefined) {
+      params.push(activo === 'true' || activo === true);
+      query += ` AND activo = $${params.length}`;
+    }
+
+    if (search) {
+      params.push(`%${search.trim().toLowerCase()}%`);
+      query += ` AND (LOWER(documento) LIKE $${params.length} OR LOWER(nombre_completo) LIKE $${params.length} OR LOWER(email) LIKE $${params.length})`;
+    }
+
+    query += ' ORDER BY nombre_completo ASC';
+
+    const result = await pool.query(query, params);
+    res.json({ success: true, data: result.rows || [] });
+  } catch (error) {
+    console.error('Error al listar usuarios:', error.message);
+    res.status(500).json({ success: false, data: [], error: error.message });
+  }
+});
+
+// GET /api/usuarios/:id - Obtener detalle de usuario por UUID o documento
+router.get('/usuarios/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
+    const query = isUuid
+      ? 'SELECT * FROM perfiles WHERE id = $1'
+      : 'SELECT * FROM perfiles WHERE LOWER(documento) = LOWER($1) OR LOWER(email) = LOWER($1)';
+
+    const result = await pool.query(query, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
+    }
+
+    res.json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    console.error('Error al obtener usuario:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/usuarios - Registro de nuevo usuario
+router.post('/usuarios', async (req, res) => {
+  try {
+    const {
+      documento,
+      nombre_completo,
+      telefono,
+      email,
+      rol = 'usuario',
+      sede = 'Medellín',
+      activo = true
+    } = req.body;
+
+    if (!documento || !nombre_completo || !email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Documento, nombre_completo y email son campos obligatorios.'
+      });
+    }
+
+    const rolesValidos = ['administrador', 'operador', 'supervisor', 'usuario'];
+    const finalRol = (rol || 'usuario').toLowerCase();
+    if (!rolesValidos.includes(finalRol)) {
+      return res.status(400).json({
+        success: false,
+        message: `Rol inválido. Roles permitidos: ${rolesValidos.join(', ')}`
+      });
+    }
+
+    const query = `
+      INSERT INTO perfiles (documento, nombre_completo, telefono, email, rol, sede, activo)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING *;
+    `;
+
+    const result = await pool.query(query, [
+      documento.trim(),
+      nombre_completo.trim(),
+      telefono ? telefono.trim() : null,
+      email.trim().toLowerCase(),
+      finalRol,
+      sede || 'Medellín',
+      activo
+    ]);
+
+    res.status(201).json({
+      success: true,
+      message: 'Usuario registrado exitosamente',
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error al crear usuario:', error.message);
+    if (error.code === '23505') {
+      const detail = (error.detail || '').toLowerCase();
+      if (detail.includes('documento')) {
+        return res.status(409).json({ success: false, message: 'Ya existe un usuario con este documento de identidad.' });
+      }
+      if (detail.includes('email')) {
+        return res.status(409).json({ success: false, message: 'Ya existe un usuario con este correo electrónico.' });
+      }
+      return res.status(409).json({ success: false, message: 'El usuario ya se encuentra registrado (documento o email duplicado).' });
+    }
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// PUT /api/usuarios/:id - Actualización de datos personales y reasignación de rol
+router.put('/usuarios/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      documento,
+      nombre_completo,
+      telefono,
+      email,
+      rol,
+      sede,
+      activo
+    } = req.body;
+
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
+    if (rol) {
+      const rolesValidos = ['administrador', 'operador', 'supervisor', 'usuario'];
+      if (!rolesValidos.includes(rol.toLowerCase())) {
+        return res.status(400).json({
+          success: false,
+          message: `Rol inválido. Roles permitidos: ${rolesValidos.join(', ')}`
+        });
+      }
+    }
+
+    const query = `
+      UPDATE perfiles
+      SET
+        documento = COALESCE($1, documento),
+        nombre_completo = COALESCE($2, nombre_completo),
+        telefono = COALESCE($3, telefono),
+        email = COALESCE($4, email),
+        rol = COALESCE($5, rol),
+        sede = COALESCE($6, sede),
+        activo = COALESCE($7, activo),
+        updated_at = NOW()
+      WHERE ${isUuid ? 'id = $8' : '(LOWER(documento) = LOWER($8) OR id::text = $8)'}
+      RETURNING *;
+    `;
+
+    const values = [
+      documento !== undefined ? documento.trim() : null,
+      nombre_completo !== undefined ? nombre_completo.trim() : null,
+      telefono !== undefined ? telefono.trim() : null,
+      email !== undefined ? email.trim().toLowerCase() : null,
+      rol !== undefined ? rol.toLowerCase() : null,
+      sede !== undefined ? sede : null,
+      activo !== undefined ? activo : null,
+      id
+    ];
+
+    const result = await pool.query(query, values);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Usuario no encontrado para actualizar.' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Usuario actualizado exitosamente',
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error al actualizar usuario:', error.message);
+    if (error.code === '23505') {
+      return res.status(409).json({ success: false, message: 'Documento o email duplicado con otro usuario existente.' });
+    }
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ==========================================
+// 5. CÁLCULO DE AUTOCONSECUTIVOS
+// ==========================================
+
+// GET /api/consecutivos/:tipo - Generar siguiente código correlativo institucional
+router.get('/consecutivos/:tipo', async (req, res) => {
+  try {
+    const tipo = (req.params.tipo || 'tecnologia').toLowerCase();
+
+    if (tipo === 'tecnologia' || tipo === 'activos' || tipo === 'equipo') {
+      // Formato P{n+1}
+      const pResult = await pool.query(`
+        SELECT COALESCE(MAX(NULLIF(regexp_replace(placa, '^[^0-9]*', '', 'g'), '')::int), 0) AS max_num
+        FROM activos
+        WHERE placa ~ '^P[0-9]+$'
+      `);
+      const nextNum = (parseInt(pResult.rows[0]?.max_num, 10) || 0) + 1;
+      return res.json({
+        success: true,
+        tipo: 'tecnologia',
+        siguiente_codigo: `P${nextNum}`,
+        numero: nextNum
+      });
+    }
+
+    if (tipo === 'robotica' || tipo === 'consumible' || tipo === 'consumibles') {
+      // Formato Rob{n+1} con 4 dígitos
+      const rResult = await pool.query(`
+        SELECT COALESCE(MAX(NULLIF(regexp_replace(id, '^[^0-9]*', '', 'g'), '')::int), 0) AS max_num
+        FROM consumibles
+        WHERE id ~* '^Rob[0-9]+$'
+      `);
+      const nextNum = (parseInt(rResult.rows[0]?.max_num, 10) || 0) + 1;
+      const padded = String(nextNum).padStart(4, '0');
+      return res.json({
+        success: true,
+        tipo: 'robotica',
+        siguiente_codigo: `Rob${padded}`,
+        numero: nextNum
+      });
+    }
+
+    if (tipo === 'papeleria') {
+      // Formato PAP{n+1} con 4 dígitos
+      const papResult = await pool.query(`
+        SELECT COALESCE(MAX(NULLIF(regexp_replace(id, '^[^0-9]*', '', 'g'), '')::int), 0) AS max_num
+        FROM consumibles
+        WHERE id ~* '^PAP[0-9]+$'
+      `);
+      const nextNum = (parseInt(papResult.rows[0]?.max_num, 10) || 0) + 1;
+      const padded = String(nextNum).padStart(4, '0');
+      return res.json({
+        success: true,
+        tipo: 'papeleria',
+        siguiente_codigo: `PAP${padded}`,
+        numero: nextNum
+      });
+    }
+
+    if (tipo === 'mobiliario') {
+      // Formato MOB{n+1} con 4 dígitos
+      const mobResult = await pool.query(`
+        SELECT COALESCE(MAX(NULLIF(regexp_replace(placa, '^[^0-9]*', '', 'g'), '')::int), 0) AS max_num
+        FROM activos
+        WHERE placa ~* '^MOB[0-9]+$'
+      `);
+      const nextNum = (parseInt(mobResult.rows[0]?.max_num, 10) || 0) + 1;
+      const padded = String(nextNum).padStart(4, '0');
+      return res.json({
+        success: true,
+        tipo: 'mobiliario',
+        siguiente_codigo: `MOB${padded}`,
+        numero: nextNum
+      });
+    }
+
+    res.status(400).json({
+      success: false,
+      message: `Tipo de consecutivo no reconocido: "${tipo}". Tipos válidos: tecnologia, robotica, papeleria, mobiliario.`
+    });
+  } catch (error) {
+    console.error('Error calculando consecutivo:', error.message);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

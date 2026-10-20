@@ -108,6 +108,8 @@ export const initDb = async () => {
       ALTER TABLE prestamos DROP CONSTRAINT IF EXISTS prestamos_placa_activo_fkey;
       ALTER TABLE prestamos ADD COLUMN IF NOT EXISTS tipo_item VARCHAR(50) DEFAULT 'activo';
       ALTER TABLE prestamos ADD COLUMN IF NOT EXISTS cantidad INT DEFAULT 1;
+      ALTER TABLE prestamos ADD COLUMN IF NOT EXISTS solicitante_documento VARCHAR(50);
+      ALTER TABLE prestamos ADD COLUMN IF NOT EXISTS usuario_id UUID;
 
       CREATE TABLE IF NOT EXISTS entregas_consumibles (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -118,8 +120,28 @@ export const initDb = async () => {
         sede VARCHAR(150),
         proyecto_motivo TEXT,
         tipo VARCHAR(50) DEFAULT 'Consumido',
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        responsable_documento VARCHAR(50),
+        usuario_id UUID
       );
+
+      CREATE TABLE IF NOT EXISTS perfiles (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        documento VARCHAR(20) UNIQUE NOT NULL,
+        nombre_completo VARCHAR(150) NOT NULL,
+        telefono VARCHAR(25),
+        email VARCHAR(100) UNIQUE NOT NULL,
+        rol VARCHAR(30) NOT NULL DEFAULT 'usuario' CHECK (rol IN ('administrador', 'operador', 'supervisor', 'usuario')),
+        activo BOOLEAN DEFAULT true,
+        sede VARCHAR(100) DEFAULT 'Medellín',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      ALTER TABLE activos ADD COLUMN IF NOT EXISTS tipo_inventario VARCHAR(50) DEFAULT 'tecnologia';
+      ALTER TABLE activos ADD COLUMN IF NOT EXISTS custodio_documento VARCHAR(50);
+      ALTER TABLE activos ADD COLUMN IF NOT EXISTS usuario_id UUID;
+      ALTER TABLE consumibles ADD COLUMN IF NOT EXISTS tipo_inventario VARCHAR(50) DEFAULT 'robotica';
     `);
 
     // Semillas si están vacías
@@ -146,6 +168,19 @@ export const initDb = async () => {
           ('MAT-003', 'Baterías Recargables AA (pack 4)', 'Electrónica', 8, 3, 'Bodega Medellín'),
           ('MAT-004', 'Cables USB-C a USB-A 1.5m', 'Cables y Adaptadores', 15, 5, 'Bodega Medellín')
         ON CONFLICT (id) DO NOTHING;
+      `);
+    }
+
+    const countPerfiles = await client.query('SELECT COUNT(*) FROM perfiles');
+    if (parseInt(countPerfiles.rows[0].count, 10) === 0) {
+      await client.query(`
+        INSERT INTO perfiles (documento, nombre_completo, telefono, email, rol, sede)
+        VALUES 
+          ('1000000001', 'Administrador General FMO', '3001234567', 'admin@marinagroup.org', 'administrador', 'Medellín'),
+          ('1000000002', 'Supervisor Calidad FMO', '3001234568', 'supervisor@marinagroup.org', 'supervisor', 'Medellín'),
+          ('1000000003', 'Operador Bodega FMO', '3001234569', 'operador@marinagroup.org', 'operador', 'Medellín'),
+          ('1000000004', 'Yury Torres', '3009876543', 'yury.torres@marinagroup.org', 'usuario', 'Medellín')
+        ON CONFLICT (documento) DO NOTHING;
       `);
     }
 

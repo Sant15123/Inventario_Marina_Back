@@ -4,66 +4,85 @@
 
 ```mermaid
 erDiagram
-    PERSONAS ||--o{ PRESTAMOS : "solicita / responsable"
-    ACTIVOS ||--o{ DETALLE_PRESTAMOS_ACTIVOS : "asignado en"
-    CONSUMIBLES ||--o{ DETALLE_PRESTAMOS_CONSUMIBLES : "entregado en"
-    PRESTAMOS ||--|{ DETALLE_PRESTAMOS_ACTIVOS : "contiene"
-    PRESTAMOS ||--o{ DETALLE_PRESTAMOS_CONSUMIBLES : "contiene"
+    PERFILES ||--o{ PRESTAMOS : "solicita / responsable"
+    PERFILES ||--o{ ENTREGAS_CONSUMIBLES : "recibe insumo"
+    PERFILES ||--o{ ACTIVOS : "custodio institucional"
+    ACTIVOS ||--o{ PRESTAMOS : "prestado en"
+    CONSUMIBLES ||--o{ PRESTAMOS : "prestado temporalmente"
+    CONSUMIBLES ||--o{ ENTREGAS_CONSUMIBLES : "salida definitiva de"
 
-    PERSONAS {
+    PERFILES {
         uuid id PK
         string documento UK
         string nombre_completo
-        string correo
+        string telefono
+        string email UK
         string rol
         string sede
         boolean activo
+        timestamptz created_at
     }
 
     ACTIVOS {
-        string placa PK,UK
+        integer id PK
+        string placa UK
         string serial UK
         string nombre
+        string tipo_inventario "tecnologia, mobiliario"
         string categoria
         string condicion
         string marca
         string modelo
         string estado
         string ubicacion
-        string responsable_actual
+        string ubicacion_estante
+        string custodio
+        string custodio_documento
+        uuid usuario_id FK
         integer cantidad
     }
 
     CONSUMIBLES {
-        string id PK,UK
+        string id PK,UK "RobXXXX, PAPXXXX"
         string material
+        string tipo_inventario "robotica, papeleria"
         string categoria
         integer disponible
         integer minimo
         string ubicacion
+        string ubicacion_estante
+        string estado
+        string condicion
     }
 
     PRESTAMOS {
-        uuid id PK
-        string codigo_prestamo UK
-        uuid persona_id FK
+        integer id PK
+        string placa_activo FK
+        string tipo_item "activo, consumible"
+        integer cantidad
+        string solicitante
+        string solicitante_documento
+        uuid usuario_id FK
+        string sede
+        string motivo
         date fecha_salida
-        date fecha_devolucion_estimada
+        date fecha_devolucion_esperada
+        date fecha_devolucion_real
         string estado
     }
 
-    DETALLE_PRESTAMOS_ACTIVOS {
+    ENTREGAS_CONSUMIBLES {
         uuid id PK
-        uuid prestamo_id FK
-        string activo_placa FK
-        string estado_entrega
-    }
-
-    DETALLE_PRESTAMOS_CONSUMIBLES {
-        uuid id PK
-        uuid prestamo_id FK
-        string consumible_id FK
-        integer cantidad_entregada
+        string material_id FK
+        string material_nombre
+        integer cantidad
+        string responsable
+        string responsable_documento
+        uuid usuario_id FK
+        string sede
+        string proyecto_motivo
+        string tipo
+        timestamptz created_at
     }
 ```
 
@@ -71,17 +90,28 @@ erDiagram
 
 | Entidad | Campo | Tipo de Clave / Restricción | Descripción |
 | :--- | :--- | :--- | :--- |
-| **PERSONAS** | `id` | Primary Key (`PK`, `UUID`) | Identificador único del usuario o responsable. |
-| **PERSONAS** | `documento` | Unique Key (`UK`) | Cédula o documento de identidad único. |
-| **ACTIVOS** | `placa` | Primary Key / Unique (`PK`, `UK`) | Código de placa único institucional. |
-| **ACTIVOS** | `serial` | Unique Key (`UK`) | Serial de fábrica único por activo físico. |
-| **CONSUMIBLES** | `id` | Primary Key / Unique (`PK`, `UK`) | Código alfanumérico identificador del material. |
-| **PRESTAMOS** | `id` | Primary Key (`PK`, `UUID`) | Identificador único del encabezado del préstamo. |
-| **PRESTAMOS** | `codigo_prestamo` | Unique Key (`UK`) | Código de radicación único para seguimiento. |
-| **PRESTAMOS** | `persona_id` | Foreign Key (`FK`) $\rightarrow$ `PERSONAS(id)` | Responsable/solicitante del préstamo (`ON DELETE RESTRICT`). |
-| **DETALLE_PRESTAMOS_ACTIVOS** | `id` | Primary Key (`PK`, `UUID`) | Identificador único del ítem asignado. |
-| **DETALLE_PRESTAMOS_ACTIVOS** | `prestamo_id` | Foreign Key (`FK`) $\rightarrow$ `PRESTAMOS(id)` | Préstamo contenedor (`ON DELETE CASCADE`). |
-| **DETALLE_PRESTAMOS_ACTIVOS** | `activo_placa` | Foreign Key (`FK`) $\rightarrow$ `ACTIVOS(placa)` | Activo asignado (`ON UPDATE CASCADE`). |
-| **DETALLE_PRESTAMOS_CONSUMIBLES** | `id` | Primary Key (`PK`, `UUID`) | Identificador del consumible entregado. |
-| **DETALLE_PRESTAMOS_CONSUMIBLES** | `prestamo_id` | Foreign Key (`FK`) $\rightarrow$ `PRESTAMOS(id)` | Préstamo contenedor (`ON DELETE CASCADE`). |
-| **DETALLE_PRESTAMOS_CONSUMIBLES** | `consumible_id` | Foreign Key (`FK`) $\rightarrow$ `CONSUMIBLES(id)` | Material consumible entregado (`ON UPDATE CASCADE`). |
+| **PERFILES** | `id` | Primary Key (`PK`, `UUID`) | Identificador único del perfil (compatible con `auth.users.id`). |
+| **PERFILES** | `documento` | Unique Key (`UK`) | Cédula o documento de identidad único institucional. |
+| **PERFILES** | `email` | Unique Key (`UK`) | Correo electrónico institucional único. |
+| **PERFILES** | `rol` | Check Constraint | Valores permitidos: `'administrador'`, `'operador'`, `'supervisor'`, `'usuario'`. |
+| **ACTIVOS** | `placa` | Primary Key / Unique (`UK`) | Código de placa único institucional (`P{n+1}` para tecnología, `MOB{n+1}` para mobiliario). |
+| **ACTIVOS** | `serial` | Unique Index Condicional | Serial de fábrica único por activo físico (excluyendo vacíos, `S/N`, `N/A`). |
+| **ACTIVOS** | `tipo_inventario` | Check / Default | Dominio: `'tecnologia'`, `'mobiliario'`. |
+| **ACTIVOS** | `ubicacion_estante` | VARCHAR | Estante, caja, gaveta o armario físico. |
+| **CONSUMIBLES** | `id` | Primary Key (`PK`, `UK`) | Código alfanumérico identificador (`Rob{n+1}` para robótica, `PAP{n+1}` para papelería). |
+| **CONSUMIBLES** | `tipo_inventario` | Check / Default | Dominio: `'robotica'`, `'papeleria'`. |
+| **CONSUMIBLES** | `disponible` | Check Constraint | `disponible >= 0` (Control atómico de stock). |
+| **PRESTAMOS** | `id` | Primary Key (`PK`, `SERIAL`) | Identificador del préstamo. |
+| **PRESTAMOS** | `placa_activo` | Reference | Código de activo o consumible prestado. |
+| **PRESTAMOS** | `solicitante_documento`| Reference / Lookup | Vínculo con `PERFILES(documento)`. |
+| **ENTREGAS_CONSUMIBLES** | `id` | Primary Key (`PK`, `UUID`) | Identificador único de salida definitiva. |
+| **ENTREGAS_CONSUMIBLES** | `material_id` | Foreign Key $\rightarrow$ `CONSUMIBLES(id)` | Insumo entregado. |
+| **ENTREGAS_CONSUMIBLES** | `responsable_documento` | Reference / Lookup | Vínculo con `PERFILES(documento)`. |
+
+---
+
+## Políticas de Seguridad RLS (Row Level Security)
+
+1. **`admin_all_perfiles`:** Acceso total (`SELECT`, `INSERT`, `UPDATE`, `DELETE`) para usuarios con rol `'administrador'`.
+2. **`staff_select_perfiles`:** Permisos de solo lectura (`SELECT`) para usuarios con rol `'supervisor'` y `'operador'`.
+3. **`user_own_perfil`:** Los usuarios con rol `'usuario'` solo pueden consultar y actualizar su propio perfil (`id = auth.uid()` o coincidencia de correo).
