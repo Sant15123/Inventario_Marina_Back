@@ -8,6 +8,7 @@ import { errorHandler } from './middleware/errorHandler.js';
 import { notFound } from './middleware/notFound.js';
 import inventoryRoutes from './routes/inventory.routes.js';
 import apiRoutes from './routes/api.routes.js';
+import authRoutes from './routes/auth.js';
 
 dotenv.config();
 
@@ -29,6 +30,9 @@ app.get('/health', (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
+
+// Rutas de autenticación (/api/auth)
+app.use('/api/auth', authRoutes);
 
 // Rutas directas para el frontend (/api/activos, /api/consumibles, /api/prestamos)
 app.use('/api', apiRoutes);

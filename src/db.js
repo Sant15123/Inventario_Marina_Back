@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import dns from 'dns';
 import { fileURLToPath } from 'url';
+import { sincronizarHistorialInicial } from './services/historial.service.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -154,10 +155,64 @@ export const initDb = async () => {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
 
+      CREATE TABLE IF NOT EXISTS historial_movimientos (
+        id SERIAL PRIMARY KEY,
+        tipo VARCHAR(50) NOT NULL,
+        elemento_nombre VARCHAR(255) NOT NULL,
+        placa_o_id VARCHAR(100),
+        cantidad INT DEFAULT 1,
+        responsable VARCHAR(255),
+        sede VARCHAR(100) DEFAULT 'Medellín',
+        fecha TIMESTAMPTZ DEFAULT NOW(),
+        detalles TEXT,
+        usuario_id UUID,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_historial_fecha ON historial_movimientos(fecha DESC);
+      CREATE INDEX IF NOT EXISTS idx_historial_placa ON historial_movimientos(placa_o_id);
+      CREATE INDEX IF NOT EXISTS idx_historial_tipo ON historial_movimientos(tipo);
+
+      CREATE TABLE IF NOT EXISTS proyectos_steam (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        nombre VARCHAR(150) NOT NULL,
+        sede_municipio VARCHAR(100),
+        descripcion TEXT,
+        activo BOOLEAN DEFAULT true,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_proyectos_activo ON proyectos_steam(activo);
+      CREATE INDEX IF NOT EXISTS idx_proyectos_sede ON proyectos_steam(sede_municipio);
+      CREATE INDEX IF NOT EXISTS idx_proyectos_nombre ON proyectos_steam(nombre);
+
+      ALTER TABLE historial_movimientos ADD COLUMN IF NOT EXISTS usuario_id UUID;
       ALTER TABLE activos ADD COLUMN IF NOT EXISTS tipo_inventario VARCHAR(50) DEFAULT 'tecnologia';
       ALTER TABLE activos ADD COLUMN IF NOT EXISTS custodio_documento VARCHAR(50);
       ALTER TABLE activos ADD COLUMN IF NOT EXISTS usuario_id UUID;
       ALTER TABLE consumibles ADD COLUMN IF NOT EXISTS tipo_inventario VARCHAR(50) DEFAULT 'robotica';
+
+      ALTER TABLE prestamos ADD COLUMN IF NOT EXISTS usuario_id UUID;
+      ALTER TABLE prestamos ADD COLUMN IF NOT EXISTS custodio_documento VARCHAR(50);
+      ALTER TABLE prestamos ADD COLUMN IF NOT EXISTS solicitante_documento VARCHAR(50);
+
+      ALTER TABLE remisiones_consumibles ADD COLUMN IF NOT EXISTS usuario_id UUID;
+      ALTER TABLE remisiones_consumibles ADD COLUMN IF NOT EXISTS custodio_documento VARCHAR(50);
+
+      ALTER TABLE perfiles ADD COLUMN IF NOT EXISTS cargo VARCHAR(150);
+      ALTER TABLE perfiles ADD COLUMN IF NOT EXISTS password VARCHAR(255);
+      ALTER TABLE historial_movimientos ADD COLUMN IF NOT EXISTS documento_responsable VARCHAR(50);
+    `);
+
+    // Sincronizar custodio_documento y solicitante_documento en prestamos
+    await client.query(`
+      UPDATE prestamos 
+      SET custodio_documento = solicitante_documento 
+      WHERE custodio_documento IS NULL AND solicitante_documento IS NOT NULL;
+      
+      UPDATE prestamos 
+      SET solicitante_documento = custodio_documento 
+      WHERE solicitante_documento IS NULL AND custodio_documento IS NOT NULL;
     `);
 
     // Semillas si están vacías
@@ -190,17 +245,31 @@ export const initDb = async () => {
     const countPerfiles = await client.query('SELECT COUNT(*) FROM perfiles');
     if (parseInt(countPerfiles.rows[0].count, 10) === 0) {
       await client.query(`
-        INSERT INTO perfiles (documento, nombre_completo, telefono, email, rol, sede)
+        INSERT INTO perfiles (documento, nombre_completo, telefono, email, rol, sede, cargo)
         VALUES 
-          ('1000000001', 'Administrador General FMO', '3001234567', 'admin@marinagroup.org', 'administrador', 'Medellín'),
-          ('1000000002', 'Supervisor Calidad FMO', '3001234568', 'supervisor@marinagroup.org', 'supervisor', 'Medellín'),
-          ('1000000003', 'Operador Bodega FMO', '3001234569', 'operador@marinagroup.org', 'operador', 'Medellín'),
-          ('1000000004', 'Yury Torres', '3009876543', 'yury.torres@marinagroup.org', 'usuario', 'Medellín')
+          ('100123456', 'Santiago Ortiz', '3001234567', 'santiago.ortiz@fmo.org', 'administrador', 'Medellín', 'Coordinador Tecnológico & STEAM'),
+          ('1002345678', 'Nicolas Tamayo', '3104567890', 'nicolas.tamayo@fmo.org', 'supervisor', 'Carmen de Viboral', 'Supervisor de Sedes & Semilleros'),
+          ('1003456789', 'Dolly Montoya', '3157891234', 'dolly.montoya@fmo.org', 'operador', 'Carmen de Viboral', 'Operadora de Inventario & Bodega'),
+          ('1040321654', 'Yury Torres', '3203216549', 'yury.torres@fmo.org', 'usuario', 'Medellín', 'Formadora Robótica STEAM'),
+          ('1064123987', 'Santiago Galeano', '3005551234', 'santiago.galeano@fmo.org', 'administrador', 'Medellín', 'Formador de Semilleros STEAM'),
+          ('1052987654', 'Sofia Muñoz', '3129876543', 'sofia.munoz@fmo.org', 'usuario', 'Medellín', 'Formadora STEAM & Electrónica')
         ON CONFLICT (documento) DO NOTHING;
       `);
     }
 
+    const countProyectos = await client.query('SELECT COUNT(*) FROM proyectos_steam');
+    if (parseInt(countProyectos.rows[0].count, 10) === 0) {
+      await client.query(`
+        INSERT INTO proyectos_steam (nombre, sede_municipio, descripcion, activo)
+        VALUES 
+          ('Semilleros de Robótica Educativa', 'Medellín', 'Formación STEAM en programación y robótica para estudiantes', true),
+          ('Aulas Conectadas STEAM', 'El Carmen', 'Dotación tecnológica e innovación educativa en sedes rurales', true),
+          ('Clubes de Innovación y Electrónica', 'La Ceja', 'Talleres prácticos de impresión 3D, sensores y electrónica básica', true);
+      `);
+    }
+
     await client.query('COMMIT');
+    await sincronizarHistorialInicial(client);
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('Error al inicializar tablas:', err);

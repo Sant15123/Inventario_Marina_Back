@@ -18,9 +18,14 @@ const server = app.listen(PORT, () => {
   console.log(`   - POST /api/activos`);
   console.log(`   - PUT/PATCH /api/activos/:placa`);
   console.log(`   - GET  /api/consumibles`);
+  console.log(`   - GET  /api/historial`);
+  console.log(`   - GET  /api/proyectos`);
+  console.log(`   - POST /api/proyectos`);
+  console.log(`   - PUT  /api/proyectos/:id`);
   console.log(`   - GET  /api/prestamos`);
   console.log(`   - POST /api/prestamos`);
   console.log(`   - PUT  /api/prestamos/:id/devolver`);
+  console.log(`   - PUT  /api/prestamos/:id/retorno`);
 });
 
 server.on('error', (error) => {
