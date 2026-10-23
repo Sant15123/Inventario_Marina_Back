@@ -173,6 +173,19 @@ export const initDb = async () => {
       CREATE INDEX IF NOT EXISTS idx_historial_placa ON historial_movimientos(placa_o_id);
       CREATE INDEX IF NOT EXISTS idx_historial_tipo ON historial_movimientos(tipo);
 
+      
+      CREATE TABLE IF NOT EXISTS sedes (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        nombre VARCHAR(150) NOT NULL UNIQUE,
+        municipio VARCHAR(100),
+        direccion TEXT,
+        activo BOOLEAN DEFAULT true,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_sedes_nombre ON sedes(nombre);
+      CREATE INDEX IF NOT EXISTS idx_sedes_municipio ON sedes(municipio);
+
       CREATE TABLE IF NOT EXISTS proyectos_steam (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         nombre VARCHAR(150) NOT NULL,
@@ -257,6 +270,21 @@ export const initDb = async () => {
       `);
     }
 
+    
+    const countSedes = await client.query('SELECT COUNT(*) FROM sedes');
+    if (parseInt(countSedes.rows[0].count, 10) === 0) {
+      await client.query(`
+        INSERT INTO sedes (nombre, municipio, direccion, activo)
+        VALUES 
+          ('Medellín', 'Medellín', 'Sede Principal FMO', true),
+          ('Carmen de Viboral', 'Carmen de Viboral', 'Casa de la Cultura / Sede Robótica', true),
+          ('La Ceja', 'La Ceja', 'Institución Educativa Aliada', true),
+          ('El Retiro', 'El Retiro', 'Sede Rural STEAM', true),
+          ('Nacional', 'Colombia', 'Cobertura Nacional', true)
+        ON CONFLICT (nombre) DO NOTHING;
+      `);
+    }
+  
     const countProyectos = await client.query('SELECT COUNT(*) FROM proyectos_steam');
     if (parseInt(countProyectos.rows[0].count, 10) === 0) {
       await client.query(`

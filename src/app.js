@@ -9,6 +9,7 @@ import { notFound } from './middleware/notFound.js';
 import inventoryRoutes from './routes/inventory.routes.js';
 import apiRoutes from './routes/api.routes.js';
 import authRoutes from './routes/auth.js';
+import sedesRoutes from './routes/sedes.routes.js';
 
 dotenv.config();
 
@@ -36,6 +37,7 @@ app.use('/api/auth', authRoutes);
 
 // Rutas directas para el frontend (/api/activos, /api/consumibles, /api/prestamos)
 app.use('/api', apiRoutes);
+app.use('/api/sedes', sedesRoutes);
 
 // Rutas previas de inventario (/api/inventory)
 app.use('/api/inventory', inventoryRoutes);
