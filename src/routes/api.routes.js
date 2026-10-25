@@ -5,6 +5,7 @@ import bcrypt from 'bcrypt';
 import { supabase, supabaseAdmin } from '../config/supabase.js';
 import { verifyToken } from '../middleware/verifyToken.js';
 import { requireAdminOnly, requireOperadorOAdmin } from '../middleware/roles.js';
+import { loginLimiter } from '../middleware/rateLimiter.js';
 import * as authController from '../controllers/authController.js';
 
 const router = Router();
@@ -1804,12 +1805,12 @@ router.get('/usuarios/mis-solicitudes', async (req, res) => {
   }
 });
 
-// GET /api/usuarios - Listar usuarios con filtros por rol y búsqueda
+// GET /api/usuarios - Listar usuarios con filtros por rol y búsqueda (excluyendo password)
 router.get('/usuarios', async (req, res) => {
   try {
     const { rol, search, sede, activo } = req.query;
 
-    let query = 'SELECT id, documento, nombre_completo, telefono, email, rol, activo, sede, created_at, updated_at FROM perfiles WHERE 1=1';
+    let query = 'SELECT id, documento, nombre_completo, telefono, email, rol, activo, sede, cargo, created_at, updated_at FROM perfiles WHERE 1=1';
     const params = [];
 
     if (rol) {
@@ -1835,22 +1836,28 @@ router.get('/usuarios', async (req, res) => {
     query += ' ORDER BY nombre_completo ASC';
 
     const result = await pool.query(query, params);
-    res.json({ success: true, data: result.rows || [] });
+    const usuariosSinPassword = (result.rows || []).map(row => {
+      const u = { ...row };
+      delete u.password;
+      return u;
+    });
+
+    res.json({ success: true, data: usuariosSinPassword });
   } catch (error) {
     console.error('Error al listar usuarios:', error.message);
     res.status(500).json({ success: false, data: [], error: error.message });
   }
 });
 
-// GET /api/usuarios/:id - Obtener detalle de usuario por UUID o documento
-router.get('/usuarios/:id', async (req, res) => {
+// GET /api/usuarios/:id & /api/perfiles/:id - Obtener detalle de usuario por UUID o documento (excluyendo password)
+const handleGetUsuarioPorId = async (req, res) => {
   try {
     const { id } = req.params;
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 
     const query = isUuid
-      ? 'SELECT * FROM perfiles WHERE id = $1'
-      : 'SELECT * FROM perfiles WHERE LOWER(documento) = LOWER($1) OR LOWER(email) = LOWER($1)';
+      ? 'SELECT id, documento, nombre_completo, telefono, email, rol, activo, sede, cargo, created_at, updated_at FROM perfiles WHERE id = $1'
+      : 'SELECT id, documento, nombre_completo, telefono, email, rol, activo, sede, cargo, created_at, updated_at FROM perfiles WHERE LOWER(documento) = LOWER($1) OR LOWER(email) = LOWER($1)';
 
     const result = await pool.query(query, [id]);
 
@@ -1858,10 +1865,60 @@ router.get('/usuarios/:id', async (req, res) => {
       return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
     }
 
-    res.json({ success: true, data: result.rows[0] });
+    const usuario = { ...result.rows[0] };
+    delete usuario.password;
+
+    res.json({ success: true, data: usuario });
   } catch (error) {
     console.error('Error al obtener usuario:', error.message);
     res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+router.get('/usuarios/:id', handleGetUsuarioPorId);
+router.get('/perfiles/:id', handleGetUsuarioPorId);
+
+// GET /api/perfiles - Alias de /api/usuarios
+router.get('/perfiles', async (req, res) => {
+  try {
+    const { rol, search, sede, activo } = req.query;
+
+    let query = 'SELECT id, documento, nombre_completo, telefono, email, rol, activo, sede, cargo, created_at, updated_at FROM perfiles WHERE 1=1';
+    const params = [];
+
+    if (rol) {
+      params.push(rol.toLowerCase());
+      query += ` AND LOWER(rol) = $${params.length}`;
+    }
+
+    if (sede) {
+      params.push(sede);
+      query += ` AND LOWER(sede) = LOWER($${params.length})`;
+    }
+
+    if (activo !== undefined) {
+      params.push(activo === 'true' || activo === true);
+      query += ` AND activo = $${params.length}`;
+    }
+
+    if (search) {
+      params.push(`%${search.trim().toLowerCase()}%`);
+      query += ` AND (LOWER(documento) LIKE $${params.length} OR LOWER(nombre_completo) LIKE $${params.length} OR LOWER(email) LIKE $${params.length})`;
+    }
+
+    query += ' ORDER BY nombre_completo ASC';
+
+    const result = await pool.query(query, params);
+    const perfilesSinPassword = (result.rows || []).map(row => {
+      const u = { ...row };
+      delete u.password;
+      return u;
+    });
+
+    res.json({ success: true, data: perfilesSinPassword });
+  } catch (error) {
+    console.error('Error al listar perfiles:', error.message);
+    res.status(500).json({ success: false, data: [], error: error.message });
   }
 });
 
@@ -2005,10 +2062,13 @@ router.post('/usuarios', requireAdminOnly, async (req, res) => {
       console.warn('Advertencia: no se pudo registrar en historial_movimientos:', auditError.message);
     }
 
-    // Respuesta exitosa
+    // Respuesta exitosa (excluyendo password)
+    const usuarioRespuesta = { ...perfilData };
+    delete usuarioRespuesta.password;
+
     return res.status(201).json({
       mensaje: 'Usuario registrado exitosamente',
-      usuario: perfilData
+      usuario: usuarioRespuesta
     });
   } catch (error) {
     console.error('Error al registrar usuario:', error.message);
@@ -2020,8 +2080,8 @@ router.post('/usuarios', requireAdminOnly, async (req, res) => {
 // 4.1 AUTENTICACIÓN: CAMBIO DE CONTRASEÑA
 // ==========================================
 
-// POST /api/auth/login
-router.post('/auth/login', authController.login);
+// POST /api/auth/login (con rate limiting)
+router.post('/auth/login', loginLimiter, authController.login);
 
 // PUT /api/auth/cambiar-password - Cambio de contraseña del usuario autenticado
 router.put('/auth/cambiar-password', verifyToken, authController.cambiarPassword);
@@ -2202,10 +2262,13 @@ router.put('/usuarios/:id', requireAdminOnly, async (req, res) => {
       return res.status(404).json({ success: false, message: 'Usuario no encontrado para actualizar y no se pudo registrar.' });
     }
 
+    const usuarioActualizado = { ...result.rows[0] };
+    delete usuarioActualizado.password;
+
     res.json({
       success: true,
       message: 'Usuario actualizado exitosamente',
-      data: result.rows[0]
+      data: usuarioActualizado
     });
   } catch (error) {
     console.error('Error al actualizar usuario:', error.message);

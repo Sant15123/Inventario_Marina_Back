@@ -84,7 +84,7 @@ export const login = async (req, res) => {
       });
     }
 
-    // 3. Emitir el token de sesión con sus datos y su rol real guardado en la base de datos
+    // 3. Emitir el token de sesión con sus datos y su rol real guardado en la base de datos (excluyendo password)
     const tokenPayload = {
       id: perfil.id,
       documento: perfil.documento,
@@ -98,11 +98,14 @@ export const login = async (req, res) => {
 
     const token = generateToken(tokenPayload);
 
+    const usuarioRespuesta = { ...tokenPayload };
+    delete usuarioRespuesta.password;
+
     return res.status(200).json({
       success: true,
       message: 'Inicio de sesión exitoso',
       token,
-      usuario: tokenPayload
+      usuario: usuarioRespuesta
     });
   } catch (error) {
     console.error('Error en /api/auth/login:', error);
