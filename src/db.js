@@ -199,6 +199,29 @@ export const initDb = async () => {
       CREATE INDEX IF NOT EXISTS idx_proyectos_sede ON proyectos_steam(sede_municipio);
       CREATE INDEX IF NOT EXISTS idx_proyectos_nombre ON proyectos_steam(nombre);
 
+      CREATE TABLE IF NOT EXISTS mobiliario (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        placa VARCHAR(100) NOT NULL UNIQUE,
+        nombre VARCHAR(255) NOT NULL,
+        categoria VARCHAR(100) NOT NULL,
+        sede VARCHAR(100) NOT NULL DEFAULT 'Medellín',
+        ubicacion_especifica VARCHAR(255),
+        material VARCHAR(100),
+        color VARCHAR(50),
+        dimensiones VARCHAR(100),
+        estado_conservacion VARCHAR(50) DEFAULT 'BUENO',
+        cantidad INT NOT NULL DEFAULT 1,
+        fecha_adquisicion DATE DEFAULT CURRENT_DATE,
+        proveedor_origen VARCHAR(255),
+        observaciones TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_mobiliario_placa ON mobiliario(placa);
+      CREATE INDEX IF NOT EXISTS idx_mobiliario_sede ON mobiliario(sede);
+      CREATE INDEX IF NOT EXISTS idx_mobiliario_categoria ON mobiliario(categoria);
+
       ALTER TABLE historial_movimientos ADD COLUMN IF NOT EXISTS usuario_id UUID;
       ALTER TABLE activos ADD COLUMN IF NOT EXISTS tipo_inventario VARCHAR(50) DEFAULT 'tecnologia';
       ALTER TABLE activos ADD COLUMN IF NOT EXISTS custodio_documento VARCHAR(50);

@@ -11,6 +11,7 @@ import apiRoutes from './routes/api.routes.js';
 import authRoutes from './routes/auth.js';
 import sedesRoutes from './routes/sedes.routes.js';
 import dashboardRoutes from './routes/dashboard.routes.js';
+import mobiliarioRoutes from './routes/mobiliarioRoutes.js';
 
 dotenv.config();
 
@@ -38,6 +39,9 @@ app.use('/api/auth', authRoutes);
 
 // Rutas de dashboard y KPIs (/api/dashboard)
 app.use('/api/dashboard', dashboardRoutes);
+
+// Rutas de mobiliario (/api/mobiliario)
+app.use('/api/mobiliario', mobiliarioRoutes);
 
 // Rutas directas para el frontend (/api/activos, /api/consumibles, /api/prestamos)
 app.use('/api', apiRoutes);
