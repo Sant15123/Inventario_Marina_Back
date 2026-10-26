@@ -2488,7 +2488,8 @@ router.put('/usuarios/:id', requireAdminOnly, async (req, res) => {
       rol,
       sede,
       cargo,
-      activo
+      activo,
+      password
     } = req.body;
 
     const nombreFinal = nombre_completo !== undefined ? nombre_completo : nombre;
@@ -2504,40 +2505,61 @@ router.put('/usuarios/:id', requireAdminOnly, async (req, res) => {
       }
     }
 
+    // Normalizar email siempre a minúsculas y sin espacios
+    const emailFinal = email !== undefined && email !== null ? String(email).trim().toLowerCase() : undefined;
+
+    // Protección de credenciales: evaluar si password viene con contenido válido
+    const hasValidPassword = typeof password === 'string' && password.trim().length > 0;
+    let passwordHash = null;
+    if (hasValidPassword) {
+      passwordHash = await bcrypt.hash(password.trim(), 10);
+    }
+
+    const updates = [];
+    const values = [];
+    let pIdx = 1;
+
+    const addField = (col, val) => {
+      updates.push(`${col} = $${pIdx++}`);
+      values.push(val);
+    };
+
+    if (documento !== undefined && documento !== null) addField('documento', documento.trim());
+    if (nombreFinal !== undefined && nombreFinal !== null) addField('nombre_completo', String(nombreFinal).trim());
+    if (telefono !== undefined) addField('telefono', telefono ? telefono.trim() : null);
+    if (emailFinal !== undefined) addField('email', emailFinal);
+    if (rol !== undefined && rol !== null) addField('rol', rol.toLowerCase());
+    if (sede !== undefined) addField('sede', sede ? sede.trim() : null);
+    if (cargo !== undefined) addField('cargo', cargo ? cargo.trim() : null);
+    if (activo !== undefined && activo !== null) addField('activo', activo);
+
+    // CRÍTICO: Bajo ninguna circunstancia actualizar la columna password si viene vacía o no fue enviada
+    if (hasValidPassword && passwordHash) {
+      addField('password', passwordHash);
+    }
+
+    updates.push(`updated_at = NOW()`);
+
+    values.push(id);
+    const whereClause = isUuid ? `id = $${pIdx}` : `(LOWER(documento) = LOWER($${pIdx}) OR id::text = $${pIdx})`;
+
     const query = `
       UPDATE perfiles
-      SET
-        documento = COALESCE($1, documento),
-        nombre_completo = COALESCE($2, nombre_completo),
-        telefono = COALESCE($3, telefono),
-        email = COALESCE($4, email),
-        rol = COALESCE($5, rol),
-        sede = COALESCE($6, sede),
-        cargo = COALESCE($7, cargo),
-        activo = COALESCE($8, activo),
-        updated_at = NOW()
-      WHERE ${isUuid ? 'id = $9' : '(LOWER(documento) = LOWER($9) OR id::text = $9)'}
+      SET ${updates.join(', ')}
+      WHERE ${whereClause}
       RETURNING *;
     `;
-
-    const values = [
-      documento !== undefined ? documento.trim() : null,
-      nombreFinal !== undefined ? String(nombreFinal).trim() : null,
-      telefono !== undefined ? telefono.trim() : null,
-      email !== undefined ? email.trim().toLowerCase() : null,
-      rol !== undefined ? rol.toLowerCase() : null,
-      sede !== undefined ? sede : null,
-      cargo !== undefined ? cargo : null,
-      activo !== undefined ? activo : null,
-      id
-    ];
 
     let result = await pool.query(query, values);
 
     // Si no encontró por ID (ej: id legado tipo 'usr-006' o mock), intentar UPSERT por documento o email
     if (result.rows.length === 0) {
       const docTarget = documento ? documento.trim() : (!isUuid ? id : null);
-      if (docTarget || email) {
+      if (docTarget || emailFinal) {
+        const defaultRole = rol ? rol.toLowerCase() : 'usuario';
+        const effectivePassword = hasValidPassword ? password.trim() : (defaultRole === 'administrador' ? 'admin123' : defaultRole === 'supervisor' ? 'sup123' : defaultRole === 'operador' ? 'oper123' : 'usu123');
+        const defaultHash = passwordHash || (await bcrypt.hash(effectivePassword, 10));
+
         const upsertQuery = `
           INSERT INTO perfiles (
             id,
@@ -2549,6 +2571,7 @@ router.put('/usuarios/:id', requireAdminOnly, async (req, res) => {
             sede,
             cargo,
             activo,
+            password,
             created_at,
             updated_at
           )
@@ -2562,6 +2585,7 @@ router.put('/usuarios/:id', requireAdminOnly, async (req, res) => {
             $7,
             $8,
             COALESCE($9, true),
+            $10,
             NOW(),
             NOW()
           )
@@ -2574,6 +2598,7 @@ router.put('/usuarios/:id', requireAdminOnly, async (req, res) => {
             sede = COALESCE(EXCLUDED.sede, perfiles.sede),
             cargo = COALESCE(EXCLUDED.cargo, perfiles.cargo),
             activo = COALESCE(EXCLUDED.activo, perfiles.activo),
+            password = ${hasValidPassword ? 'EXCLUDED.password' : 'perfiles.password'},
             updated_at = NOW()
           RETURNING *;
         `;
@@ -2583,23 +2608,24 @@ router.put('/usuarios/:id', requireAdminOnly, async (req, res) => {
           docTarget || 'DOC-' + Date.now(),
           nombreFinal ? String(nombreFinal).trim() : 'Usuario SIGA',
           telefono ? telefono.trim() : '3000000000',
-          email ? email.trim().toLowerCase() : `usuario_${Date.now()}@fmo.org`,
-          rol ? rol.toLowerCase() : 'usuario',
+          emailFinal || `usuario_${Date.now()}@fmo.org`,
+          defaultRole,
           sede || 'Medellín',
           cargo || 'Funcionario FMO',
-          activo !== undefined ? activo : true
+          activo !== undefined ? activo : true,
+          defaultHash
         ] : [
           docTarget || 'DOC-' + Date.now(),
           nombreFinal ? String(nombreFinal).trim() : 'Usuario SIGA',
           telefono ? telefono.trim() : '3000000000',
-          email ? email.trim().toLowerCase() : `usuario_${Date.now()}@fmo.org`,
-          rol ? rol.toLowerCase() : 'usuario',
+          emailFinal || `usuario_${Date.now()}@fmo.org`,
+          defaultRole,
           sede || 'Medellín',
           cargo || 'Funcionario FMO',
-          activo !== undefined ? activo : true
+          activo !== undefined ? activo : true,
+          defaultHash
         ];
 
-        // Si no es UUID, ajustamos la query para no pasar $1 para id
         const finalUpsertQuery = isUuid ? upsertQuery : `
           INSERT INTO perfiles (
             id,
@@ -2611,6 +2637,7 @@ router.put('/usuarios/:id', requireAdminOnly, async (req, res) => {
             sede,
             cargo,
             activo,
+            password,
             created_at,
             updated_at
           )
@@ -2624,6 +2651,7 @@ router.put('/usuarios/:id', requireAdminOnly, async (req, res) => {
             $6,
             $7,
             COALESCE($8, true),
+            $9,
             NOW(),
             NOW()
           )
@@ -2636,6 +2664,7 @@ router.put('/usuarios/:id', requireAdminOnly, async (req, res) => {
             sede = COALESCE(EXCLUDED.sede, perfiles.sede),
             cargo = COALESCE(EXCLUDED.cargo, perfiles.cargo),
             activo = COALESCE(EXCLUDED.activo, perfiles.activo),
+            password = ${hasValidPassword ? 'EXCLUDED.password' : 'perfiles.password'},
             updated_at = NOW()
           RETURNING *;
         `;
@@ -2646,6 +2675,22 @@ router.put('/usuarios/:id', requireAdminOnly, async (req, res) => {
 
     if (result.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Usuario no encontrado para actualizar y no se pudo registrar.' });
+    }
+
+    const perfilActualizado = result.rows[0];
+
+    // Sincronizar con Supabase Auth si corresponde
+    if (isUuid && perfilActualizado.id) {
+      try {
+        const authUpdates = {};
+        if (emailFinal) authUpdates.email = emailFinal;
+        if (hasValidPassword) authUpdates.password = password.trim();
+        if (Object.keys(authUpdates).length > 0) {
+          await supabaseAdmin.auth.admin.updateUserById(perfilActualizado.id, authUpdates);
+        }
+      } catch (authSyncErr) {
+        console.warn('Aviso no crítico al sincronizar Supabase Auth:', authSyncErr.message);
+      }
     }
 
     const usuarioActualizado = { ...result.rows[0] };

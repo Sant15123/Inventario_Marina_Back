@@ -9,8 +9,9 @@ import { generateToken } from '../middleware/verifyToken.js';
  */
 export const login = async (req, res) => {
   try {
-    const { identifier, email, documento, password } = req.body;
-    const loginIdentifier = String(identifier || email || documento || '').trim().toLowerCase();
+    const { identifier, email, documento, username, usuario, password } = req.body;
+    const rawIdentifier = identifier || email || documento || username || usuario || '';
+    const loginIdentifier = String(rawIdentifier).trim().toLowerCase();
     const passwordIngresada = String(password || '').trim();
 
     if (!loginIdentifier || !passwordIngresada) {
@@ -21,11 +22,11 @@ export const login = async (req, res) => {
       });
     }
 
-    // 1. Buscar al usuario en public.perfiles por email o documento
+    // 1. Buscar al usuario en public.perfiles por email o documento normalizado a minúsculas
     const query = `
       SELECT id, documento, nombre_completo, telefono, email, rol, sede, cargo, activo, password
       FROM perfiles
-      WHERE LOWER(email) = LOWER($1) OR LOWER(documento) = LOWER($1)
+      WHERE LOWER(TRIM(email)) = $1 OR LOWER(TRIM(documento)) = $1
       LIMIT 1;
     `;
     const result = await pool.query(query, [loginIdentifier]);
