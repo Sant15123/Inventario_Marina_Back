@@ -7,8 +7,15 @@ import { verifyToken } from '../middleware/verifyToken.js';
 import { requireAdminOnly, requireOperadorOAdmin } from '../middleware/roles.js';
 import { loginLimiter } from '../middleware/rateLimiter.js';
 import * as authController from '../controllers/authController.js';
+import { getDashboardKPIs } from '../controllers/dashboardController.js';
 
 const router = Router();
+
+// ==========================================
+// -1. DASHBOARD KPIS
+// ==========================================
+router.get('/dashboard/kpis', getDashboardKPIs);
+router.get('/dashboard', getDashboardKPIs);
 
 // ==========================================
 // 0. HISTORIAL DE MOVIMIENTOS Y AUDITORÍA

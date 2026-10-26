@@ -10,6 +10,7 @@ import inventoryRoutes from './routes/inventory.routes.js';
 import apiRoutes from './routes/api.routes.js';
 import authRoutes from './routes/auth.js';
 import sedesRoutes from './routes/sedes.routes.js';
+import dashboardRoutes from './routes/dashboard.routes.js';
 
 dotenv.config();
 
@@ -34,6 +35,9 @@ app.get('/api/health', (req, res) => {
 
 // Rutas de autenticación (/api/auth)
 app.use('/api/auth', authRoutes);
+
+// Rutas de dashboard y KPIs (/api/dashboard)
+app.use('/api/dashboard', dashboardRoutes);
 
 // Rutas directas para el frontend (/api/activos, /api/consumibles, /api/prestamos)
 app.use('/api', apiRoutes);

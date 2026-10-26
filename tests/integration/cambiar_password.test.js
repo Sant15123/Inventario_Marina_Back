@@ -141,6 +141,8 @@ describe('Suite de Pruebas: PUT /api/auth/cambiar-password', () => {
   });
 
   it('debe retornar 200 y actualizar perfiles aunque Supabase Auth devuelva User not found', async () => {
+    const bcrypt = (await import('bcrypt')).default;
+    jest.spyOn(bcrypt, 'compare').mockResolvedValueOnce(true);
     jest.spyOn(supabaseAdmin.auth.admin, 'updateUserById').mockResolvedValueOnce({
       data: null,
       error: { message: 'User not found' }
