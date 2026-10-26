@@ -734,8 +734,42 @@ router.delete('/activos/:placa', requireAdminOnly, handleDeleteActivo);
 // GET /api/consumibles - Lista de consumibles / materiales
 router.get('/consumibles', async (req, res, next) => {
   try {
-    const result = await pool.query('SELECT * FROM consumibles ORDER BY material ASC');
-    res.json({ success: true, data: result.rows || [] });
+    const { tipo, tipo_inventario, categoria, search } = req.query;
+    const requestedTipo = (tipo || tipo_inventario || '').toString().trim().toUpperCase();
+
+    let query = 'SELECT * FROM consumibles WHERE 1=1';
+    const params = [];
+
+    if (requestedTipo === 'ROBOTICA') {
+      // Excluir explícitamente cualquier ítem cuyo tipo_inventario o categoría sea de papelería / oficina
+      query += ` AND LOWER(COALESCE(tipo_inventario, 'robotica')) = 'robotica'
+                 AND LOWER(COALESCE(categoria, '')) NOT LIKE '%papeler%'
+                 AND LOWER(COALESCE(categoria, '')) NOT LIKE '%oficina%'`;
+    } else if (requestedTipo === 'PAPELERIA') {
+      // Retornar únicamente los insumos destinados a papelería y formación STEAM
+      query += ` AND (LOWER(COALESCE(tipo_inventario, '')) = 'papeleria'
+                 OR LOWER(COALESCE(categoria, '')) LIKE '%papeler%'
+                 OR LOWER(COALESCE(categoria, '')) LIKE '%oficina%')`;
+    } else if (requestedTipo) {
+      params.push(requestedTipo.toLowerCase());
+      query += ` AND LOWER(COALESCE(tipo_inventario, '')) = $${params.length}`;
+    }
+
+    if (categoria && categoria !== 'todas' && categoria !== 'TODAS') {
+      params.push(`%${categoria.trim().toLowerCase()}%`);
+      query += ` AND LOWER(COALESCE(categoria, '')) LIKE $${params.length}`;
+    }
+
+    if (search && search.trim()) {
+      params.push(`%${search.trim().toLowerCase()}%`);
+      const pIdx = params.length;
+      query += ` AND (LOWER(id) LIKE $${pIdx} OR LOWER(material) LIKE $${pIdx} OR LOWER(COALESCE(descripcion, '')) LIKE $${pIdx})`;
+    }
+
+    query += ' ORDER BY material ASC';
+
+    const result = await pool.query(query, params);
+    res.json({ success: true, count: result.rows.length, data: result.rows || [] });
   } catch (error) {
     console.error('Error al obtener consumibles de DB:', error.message);
     res.status(500).json({ success: false, data: [], error: error.message });
@@ -761,7 +795,9 @@ router.post('/consumibles', requireAdminOnly, async (req, res, next) => {
       fecha_compra,
       fecha_vencimiento_garantia,
       ubicacion_estante,
-      tipo_inventario
+      tipo_inventario,
+      tipo,
+      modulo
     } = req.body;
 
     // Validación básica de requeridos
@@ -772,15 +808,19 @@ router.post('/consumibles', requireAdminOnly, async (req, res, next) => {
       });
     }
 
-    // Normalizar tipo_inventario según categoría si no se especifica
-    let finalTipoInventario = (tipo_inventario || 'robotica').toLowerCase();
-    const catLower = (categoria || '').toLowerCase();
-    if (catLower.includes('papeler') || catLower.includes('oficina')) {
+    // Normalizar tipo_inventario según campo explícito (tipo_inventario, tipo, modulo) o según categoría
+    const rawTipo = (tipo_inventario || tipo || modulo || '').toString().trim().toLowerCase();
+    const catLower = (categoria || '').toString().trim().toLowerCase();
+    let finalTipoInventario = rawTipo || 'robotica';
+
+    if (catLower.includes('papeler') || catLower.includes('oficina') || rawTipo === 'papeleria') {
       finalTipoInventario = 'papeleria';
-    } else if (catLower.includes('mobil') || catLower.includes('mueble') || catLower.includes('silla') || catLower.includes('mesa') || catLower.includes('estante')) {
+    } else if (catLower.includes('mobil') || catLower.includes('mueble') || catLower.includes('silla') || catLower.includes('mesa') || catLower.includes('estante') || rawTipo === 'mobiliario') {
       finalTipoInventario = 'mobiliario';
-    } else if (catLower.includes('tecnolog') || catLower.includes('laptop') || catLower.includes('pc') || catLower.includes('tablet')) {
+    } else if (catLower.includes('tecnolog') || catLower.includes('laptop') || catLower.includes('pc') || catLower.includes('tablet') || rawTipo === 'tecnologia') {
       finalTipoInventario = 'tecnologia';
+    } else if (!rawTipo) {
+      finalTipoInventario = 'robotica';
     }
 
     const query = `
@@ -862,11 +902,28 @@ router.put('/consumibles/:id', requireAdminOnly, async (req, res) => {
       fecha_compra,
       fecha_vencimiento_garantia,
       ubicacion_estante,
-      tipo_inventario
+      tipo_inventario,
+      tipo,
+      modulo
     } = req.body;
 
     const targetId = (nuevo_id || bodyId || placa || codigo || '').trim();
     const finalId = targetId || id;
+
+    // Normalizar tipo_inventario si viene categoria o tipo/modulo
+    let finalTipoInventario = tipo_inventario || tipo || modulo;
+    if (!finalTipoInventario && categoria) {
+      const catLower = categoria.toString().trim().toLowerCase();
+      if (catLower.includes('papeler') || catLower.includes('oficina')) {
+        finalTipoInventario = 'papeleria';
+      } else if (catLower.includes('mobil') || catLower.includes('mueble') || catLower.includes('silla') || catLower.includes('mesa') || catLower.includes('estante')) {
+        finalTipoInventario = 'mobiliario';
+      } else if (catLower.includes('tecnolog') || catLower.includes('laptop') || catLower.includes('pc') || catLower.includes('tablet')) {
+        finalTipoInventario = 'tecnologia';
+      } else {
+        finalTipoInventario = 'robotica';
+      }
+    }
 
     // Si cambió la placa / código / id, verificar que no colisione con otro consumible existente
     if (targetId && targetId.toLowerCase() !== id.toLowerCase()) {
@@ -915,7 +972,7 @@ router.put('/consumibles/:id', requireAdminOnly, async (req, res) => {
       fecha_compra || null,
       fecha_vencimiento_garantia || null,
       ubicacion_estante !== undefined ? ubicacion_estante : null,
-      tipo_inventario !== undefined ? tipo_inventario : null,
+      finalTipoInventario !== undefined ? finalTipoInventario : null,
       id
     ];
 
