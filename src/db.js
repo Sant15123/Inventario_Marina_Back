@@ -211,6 +211,7 @@ export const initDb = async () => {
 
       ALTER TABLE remisiones_consumibles ADD COLUMN IF NOT EXISTS usuario_id UUID;
       ALTER TABLE remisiones_consumibles ADD COLUMN IF NOT EXISTS custodio_documento VARCHAR(50);
+      ALTER TABLE items_solicitud ALTER COLUMN item_id TYPE VARCHAR(255);
 
       ALTER TABLE perfiles ADD COLUMN IF NOT EXISTS cargo VARCHAR(150);
       ALTER TABLE perfiles ADD COLUMN IF NOT EXISTS password VARCHAR(255);

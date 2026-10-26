@@ -1980,21 +1980,99 @@ router.get('/solicitudes', async (req, res) => {
 
 // POST /api/solicitudes - Crear solicitud con persistencia atómica en Supabase/PostgreSQL
 router.post('/solicitudes', async (req, res) => {
-  const client = await pool.connect();
+  let client = null;
   try {
+    const authUser = parseAuthUser(req);
     const {
-      usuario_id,
-      usuario_nombre,
+      usuario_id: reqUsuarioId,
+      perfil_id,
+      usuario_nombre: reqUsuarioNombre,
+      responsable,
       sede = 'Medellín',
-      tipo_solicitud = 'Préstamo',
+      tipo_solicitud,
+      tipoSolicitud,
+      tipo,
       proyecto_steam_id,
+      proyectoId,
       motivo = '',
+      justificacion,
       fecha_devolucion_estimada,
+      fechaEstimada,
       items = []
-    } = req.body;
+    } = req.body || {};
+
+    client = await pool.connect();
+
+    // 1. Extraer y validar usuario auténtico de la base de datos para garantizar integridad referencial (FK en perfiles)
+    let finalUsuarioId = null;
+    let finalUsuarioNombre = (reqUsuarioNombre || responsable || authUser.responsable || 'Usuario Solicitante').trim();
+
+    const candidateUserId = (authUser.id || reqUsuarioId || perfil_id || '').toString().trim();
+    const candidateDoc = (authUser.documento || '').toString().trim();
+    const isCandidateUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(candidateUserId);
+
+    if (isCandidateUuid || candidateDoc || candidateUserId) {
+      try {
+        const uQuery = `
+          SELECT id, nombre_completo, sede 
+          FROM perfiles 
+          WHERE (CASE WHEN $1::boolean THEN id = $2::uuid ELSE false END)
+             OR (documento IS NOT NULL AND LOWER(TRIM(documento)) = LOWER(TRIM($3)))
+             OR (documento IS NOT NULL AND LOWER(TRIM(documento)) = LOWER(TRIM($4)))
+          LIMIT 1
+        `;
+        const uRes = await client.query(uQuery, [isCandidateUuid, isCandidateUuid ? candidateUserId : null, candidateDoc || '', candidateUserId || '']);
+        if (uRes.rows.length > 0) {
+          finalUsuarioId = uRes.rows[0].id;
+          if (!reqUsuarioNombre && uRes.rows[0].nombre_completo) {
+            finalUsuarioNombre = uRes.rows[0].nombre_completo;
+          }
+        }
+      } catch (errPerfil) {
+        console.warn('Aviso resolviendo perfil para solicitud:', errPerfil.message);
+      }
+    }
+
+    // 2. Normalizar tipo de solicitud según constraints (PRESTAMO_EQUIPO, CONSUMIBLES, PROYECTO_STEAM)
+    const rawTipo = (tipo_solicitud || tipoSolicitud || tipo || 'PRESTAMO_EQUIPO').toString().trim().toUpperCase();
+    let finalTipoSolicitud = 'PRESTAMO_EQUIPO';
+    if (rawTipo.includes('CONSUMIB')) {
+      finalTipoSolicitud = 'CONSUMIBLES';
+    } else if (rawTipo.includes('STEAM') || rawTipo.includes('PROYECTO')) {
+      finalTipoSolicitud = 'PROYECTO_STEAM';
+    } else {
+      finalTipoSolicitud = 'PRESTAMO_EQUIPO';
+    }
+
+    // 3. Normalizar motivo o justificación
+    const finalMotivo = (motivo || justificacion || '').toString().trim() || 'Solicitud de inventario';
+
+    // 4. Normalizar sede
+    const finalSede = (sede || 'Medellín').toString().trim();
+
+    // 5. Validar proyecto_steam_id si es un UUID válido existente
+    let finalProyectoId = null;
+    const candidateProyecto = (proyecto_steam_id || proyectoId || '').toString().trim();
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(candidateProyecto)) {
+      try {
+        const pCheck = await client.query('SELECT id FROM proyectos_steam WHERE id = $1', [candidateProyecto]);
+        if (pCheck.rows.length > 0) {
+          finalProyectoId = pCheck.rows[0].id;
+        }
+      } catch {
+        finalProyectoId = null;
+      }
+    }
+
+    // 6. Normalizar fecha estimada de devolución (permitir null)
+    let finalFechaDevolucion = (fecha_devolucion_estimada || fechaEstimada || null);
+    if (finalFechaDevolucion) {
+      finalFechaDevolucion = String(finalFechaDevolucion).trim().split('T')[0];
+    }
 
     await client.query('BEGIN');
 
+    // 7. Insertar en tabla principal solicitudes_inventario
     const solInsert = `
       INSERT INTO solicitudes_inventario (
         id, usuario_id, usuario_nombre, sede, tipo_solicitud, proyecto_steam_id, motivo, fecha_devolucion_estimada, estado, creado_en
@@ -2004,20 +2082,28 @@ router.post('/solicitudes', async (req, res) => {
     `;
 
     const solRes = await client.query(solInsert, [
-      usuario_id || null,
-      usuario_nombre || 'Usuario Solicitante',
-      sede,
-      tipo_solicitud,
-      proyecto_steam_id || null,
-      motivo,
-      fecha_devolucion_estimada || null
+      finalUsuarioId,
+      finalUsuarioNombre,
+      finalSede,
+      finalTipoSolicitud,
+      finalProyectoId,
+      finalMotivo,
+      finalFechaDevolucion
     ]);
 
     const nuevaSol = solRes.rows[0];
     const itemsGuardados = [];
 
+    // 8. Insertar ítems asociados en items_solicitud
     if (Array.isArray(items) && items.length > 0) {
       for (const it of items) {
+        // Normalizar tipo_item: constraint sólo admite 'ACTIVO' o 'CONSUMIBLE'
+        const rawTipoItem = (it.tipo_item || it.tipo || it.itemType || 'ACTIVO').toString().trim().toUpperCase();
+        const finalTipoItem = rawTipoItem.includes('CONSUMIB') ? 'CONSUMIBLE' : 'ACTIVO';
+        const finalNombreItem = (it.nombre_item || it.nombre || it.name || it.material || 'Artículo solicitado').toString().trim();
+        const finalCantidad = Math.max(1, parseInt(it.cantidad || it.quantity, 10) || 1);
+        const finalItemId = it.item_id !== undefined && it.item_id !== null ? String(it.item_id).trim() : null;
+
         const itemRes = await client.query(`
           INSERT INTO items_solicitud (
             id, solicitud_id, tipo_item, item_id, nombre_item, cantidad
@@ -2026,10 +2112,10 @@ router.post('/solicitudes', async (req, res) => {
           ) RETURNING *;
         `, [
           nuevaSol.id,
-          it.tipo_item || 'activo',
-          it.item_id || null,
-          it.nombre_item || it.nombre || 'Item solicitado',
-          Math.max(1, parseInt(it.cantidad, 10) || 1)
+          finalTipoItem,
+          finalItemId,
+          finalNombreItem,
+          finalCantidad
         ]);
         itemsGuardados.push(itemRes.rows[0]);
       }
@@ -2037,7 +2123,7 @@ router.post('/solicitudes', async (req, res) => {
 
     await client.query('COMMIT');
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message: 'Solicitud creada con éxito en base de datos',
       data: {
@@ -2046,11 +2132,23 @@ router.post('/solicitudes', async (req, res) => {
       }
     });
   } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('Error al crear solicitud:', error.message);
-    res.status(500).json({ success: false, error: error.message });
+    if (client) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        // Ignorar error al hacer rollback
+      }
+    }
+    console.error('Error detallado en POST /api/solicitudes:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error al registrar la solicitud',
+      error: error.message
+    });
   } finally {
-    client.release();
+    if (client) {
+      client.release();
+    }
   }
 });
 
