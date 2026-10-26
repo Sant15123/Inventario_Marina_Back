@@ -1007,34 +1007,30 @@ router.delete('/consumibles/:id', requireAdminOnly, async (req, res) => {
 
 // Función auxiliar para validar y resolver custodio/usuario con integridad relacional
 const resolverUsuarioCustodio = async (clientOrPool, { usuario_id, custodio_documento, solicitante_documento, documento, solicitante, responsable }) => {
-  const targetId = (usuario_id || '').trim();
-  const targetDoc = (custodio_documento || solicitante_documento || documento || '').trim();
-  const targetNombre = (solicitante || responsable || '').trim();
+  const targetId = (usuario_id || '').toString().trim();
+  const targetDoc = (custodio_documento || solicitante_documento || documento || '').toString().trim();
+  const targetNombre = (solicitante || responsable || '').toString().trim();
 
-  // 1. Si se proporciona usuario_id (UUID)
+  // 1. Si se proporciona usuario_id
   if (targetId) {
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId);
-    if (!isUuid) {
-      const err = new Error(`El usuario_id "${targetId}" no tiene un formato UUID válido.`);
-      err.statusCode = 400;
-      throw err;
+    if (isUuid) {
+      const resUser = await clientOrPool.query(
+        'SELECT id, documento, nombre_completo, email, rol, sede, activo FROM perfiles WHERE id = $1',
+        [targetId]
+      );
+      if (resUser.rows.length > 0) {
+        return resUser.rows[0];
+      }
+    } else {
+      const resUser = await clientOrPool.query(
+        'SELECT id, documento, nombre_completo, email, rol, sede, activo FROM perfiles WHERE LOWER(documento) = LOWER($1)',
+        [targetId]
+      );
+      if (resUser.rows.length > 0) {
+        return resUser.rows[0];
+      }
     }
-    const resUser = await clientOrPool.query(
-      'SELECT id, documento, nombre_completo, email, rol, sede, activo FROM perfiles WHERE id = $1',
-      [targetId]
-    );
-    if (resUser.rows.length === 0) {
-      const err = new Error(`El usuario/custodio con ID "${targetId}" no existe en el sistema de usuarios.`);
-      err.statusCode = 400;
-      throw err;
-    }
-    const user = resUser.rows[0];
-    if (user.activo === false) {
-      const err = new Error(`El usuario/custodio "${user.nombre_completo}" se encuentra inactivo en el sistema.`);
-      err.statusCode = 400;
-      throw err;
-    }
-    return user;
   }
 
   // 2. Si se proporciona documento
@@ -1044,23 +1040,14 @@ const resolverUsuarioCustodio = async (clientOrPool, { usuario_id, custodio_docu
       [targetDoc]
     );
     if (resUser.rows.length > 0) {
-      const user = resUser.rows[0];
-      if (user.activo === false) {
-        const err = new Error(`El usuario/custodio con documento "${targetDoc}" se encuentra inactivo.`);
-        err.statusCode = 400;
-        throw err;
-      }
-      return user;
+      return resUser.rows[0];
     }
-    const err = new Error(`No se encontró ningún usuario/custodio registrado con el documento "${targetDoc}".`);
-    err.statusCode = 400;
-    throw err;
   }
 
-  // 3. Si se proporciona nombre, intentar asociar por nombre exacto
+  // 3. Si se proporciona nombre, intentar asociar por nombre exacto o parcial
   if (targetNombre) {
     const resUser = await clientOrPool.query(
-      'SELECT id, documento, nombre_completo, email, rol, sede, activo FROM perfiles WHERE LOWER(nombre_completo) = LOWER($1)',
+      "SELECT id, documento, nombre_completo, email, rol, sede, activo FROM perfiles WHERE LOWER(nombre_completo) = LOWER($1) OR LOWER(nombre_completo) ILIKE '%' || LOWER($1) || '%' LIMIT 1",
       [targetNombre]
     );
     if (resUser.rows.length > 0) {
@@ -1402,211 +1389,286 @@ router.post('/prestamos', requireOperadorOAdmin, async (req, res, next) => {
     const {
       placa_activo,
       item_id,
+      itemId,
+      activo_id,
+      placa,
       tipo_item,
       cantidad = 1,
       solicitante,
       responsable,
+      person,
       custodio_documento,
       solicitante_documento,
       documento,
       usuario_id,
       sede = 'Medellín',
       motivo = '',
+      motive = '',
       fecha_salida,
+      fecha_prestamo,
       fecha_devolucion_esperada,
-      fecha_devolucion_estimada
-    } = req.body;
+      fecha_devolucion_estimada,
+      fecha_devolucion_pactada,
+      fecha_devolucion,
+      expectedReturn,
+      solicitud_id,
+      solicitudId,
+      proyecto_id,
+      proyecto_steam_id,
+      proyecto_steam,
+      proyecto
+    } = req.body || {};
 
-    const finalItemId = (item_id || placa_activo || '').trim();
-    const finalSolicitante = (solicitante || responsable || '').trim();
-    const finalFechaDevolucion = fecha_devolucion_esperada || fecha_devolucion_estimada;
+    const rawItemId = (activo_id || placa || item_id || itemId || placa_activo || '').toString().trim();
+    const rawSolicitante = (solicitante || responsable || person || '').toString().trim();
+    const rawFechaDevolucion = fecha_devolucion_pactada || fecha_devolucion_esperada || fecha_devolucion_estimada || fecha_devolucion || expectedReturn || null;
     const finalCantidad = Math.max(1, parseInt(cantidad, 10) || 1);
+    const finalMotivo = (motivo || motive || 'Préstamo operativo asignado').toString().trim();
 
-    if (!finalItemId || (!finalSolicitante && !usuario_id && !custodio_documento && !documento) || !finalFechaDevolucion) {
+    // Fecha de devolución por defecto a 15 días si no viene especificada
+    let finalFechaDevolucion = rawFechaDevolucion ? String(rawFechaDevolucion).trim().split('T')[0] : null;
+    if (!finalFechaDevolucion) {
+      const defaultReturn = new Date();
+      defaultReturn.setDate(defaultReturn.getDate() + 15);
+      finalFechaDevolucion = defaultReturn.toISOString().split('T')[0];
+    }
+
+    if (!rawItemId && (!req.body?.unitCodes || req.body.unitCodes.length === 0) && (!req.body?.placas || req.body.placas.length === 0)) {
       return res.status(400).json({
         success: false,
-        message: 'El identificador del ítem (item_id o placa_activo), solicitante/custodio y fecha_devolucion_esperada son requeridos.'
+        message: 'El identificador del ítem o placa física es requerido.'
       });
+    }
+
+    // Resolver placas a despachar (soporte individual o lista unitCodes/placas)
+    const placasTarget = [];
+    if (req.body?.unitCodes && Array.isArray(req.body.unitCodes) && req.body.unitCodes.length > 0) {
+      req.body.unitCodes.forEach(p => p && placasTarget.push(String(p).trim()));
+    } else if (req.body?.placas && Array.isArray(req.body.placas) && req.body.placas.length > 0) {
+      req.body.placas.forEach(p => p && placasTarget.push(String(p).trim()));
+    } else if (rawItemId) {
+      placasTarget.push(rawItemId);
     }
 
     await client.query('BEGIN');
 
-    // Validar usuario custodio en tabla perfiles
+    // Validar usuario custodio en tabla perfiles de forma flexible
+    const isExplicitUuid = usuario_id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(usuario_id).trim());
+    const explicitDoc = custodio_documento || solicitante_documento;
+
     const usuarioValido = await resolverUsuarioCustodio(client, {
       usuario_id,
-      custodio_documento: custodio_documento || solicitante_documento || documento,
-      solicitante: finalSolicitante
+      custodio_documento: explicitDoc || documento,
+      solicitante: rawSolicitante
     });
+
+    if (isExplicitUuid && !usuarioValido) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        success: false,
+        error: `El usuario_id "${usuario_id}" no existe en el catálogo de perfiles.`
+      });
+    }
+
+    if (explicitDoc && !usuarioValido) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        success: false,
+        error: `No se encontró ningún perfil con el documento "${explicitDoc}".`
+      });
+    }
 
     const finalUsuarioId = usuarioValido ? usuarioValido.id : null;
     const finalCustodioDoc = usuarioValido ? usuarioValido.documento : (custodio_documento || solicitante_documento || documento || null);
-    const finalNombreCustodio = usuarioValido ? usuarioValido.nombre_completo : finalSolicitante;
+    const finalNombreCustodio = usuarioValido ? usuarioValido.nombre_completo : (rawSolicitante || 'Custodio Asignado');
     const finalSede = sede || (usuarioValido ? usuarioValido.sede : 'Medellín');
 
-    // Determinar si es consumible o activo
-    let detectedTipo = tipo_item ? tipo_item.toLowerCase() : null;
-    if (!detectedTipo) {
-      if (finalItemId.toUpperCase().startsWith('ROB') || finalItemId.toUpperCase().startsWith('MAT')) {
-        detectedTipo = 'consumible';
+    const prestamosInsertados = [];
+
+    for (const curPlaca of placasTarget) {
+      // Determinar si es consumible o activo
+      let detectedTipo = tipo_item ? tipo_item.toLowerCase() : null;
+      if (!detectedTipo) {
+        if (curPlaca.toUpperCase().startsWith('ROB') || curPlaca.toUpperCase().startsWith('MAT')) {
+          detectedTipo = 'consumible';
+        } else {
+          const checkCons = await client.query('SELECT id FROM consumibles WHERE LOWER(id) = LOWER($1)', [curPlaca]);
+          detectedTipo = checkCons.rows.length > 0 ? 'consumible' : 'activo';
+        }
+      }
+
+      let prestamoInsertado;
+
+      if (detectedTipo === 'consumible') {
+        const consRes = await client.query(
+          'SELECT * FROM consumibles WHERE LOWER(id) = LOWER($1) FOR UPDATE',
+          [curPlaca]
+        );
+
+        if (consRes.rows.length === 0) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({
+            success: false,
+            message: `Consumible con código ${curPlaca} no encontrado.`
+          });
+        }
+
+        const consumibleActual = consRes.rows[0];
+        const stockDisponible = parseInt(consumibleActual.disponible, 10) || 0;
+
+        if (stockDisponible < finalCantidad) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({
+            success: false,
+            message: `Stock insuficiente para ${consumibleActual.material} (Solicitado: ${finalCantidad}, Disponible: ${stockDisponible})`
+          });
+        }
+
+        await client.query(
+          'UPDATE consumibles SET disponible = disponible - $1 WHERE id = $2 AND disponible >= $1',
+          [finalCantidad, consumibleActual.id]
+        );
+
+        const prestamoRes = await client.query(
+          `INSERT INTO prestamos (
+              placa_activo,
+              tipo_item,
+              cantidad,
+              solicitante,
+              sede,
+              motivo,
+              fecha_salida,
+              fecha_devolucion_esperada,
+              estado,
+              usuario_id,
+              custodio_documento,
+              solicitante_documento
+            )
+            VALUES ($1, 'consumible', $2, $3, $4, $5, COALESCE($6::date, CURRENT_DATE), $7, 'Activo', $8, $9, $9)
+            RETURNING *`,
+          [
+            consumibleActual.id,
+            finalCantidad,
+            finalNombreCustodio,
+            finalSede,
+            finalMotivo,
+            fecha_salida || fecha_prestamo || null,
+            finalFechaDevolucion,
+            finalUsuarioId,
+            finalCustodioDoc
+          ]
+        );
+
+        prestamoInsertado = prestamoRes.rows[0];
+        prestamoInsertado.nombre_activo = consumibleActual.material;
       } else {
-        const checkCons = await client.query('SELECT id FROM consumibles WHERE LOWER(id) = LOWER($1)', [finalItemId]);
-        detectedTipo = checkCons.rows.length > 0 ? 'consumible' : 'activo';
+        // Flujo de Activo Tecnológico / Físico
+        const activoRes = await client.query(
+          'SELECT * FROM activos WHERE LOWER(placa) = LOWER($1) OR id::text = $1 FOR UPDATE',
+          [curPlaca]
+        );
+
+        if (activoRes.rows.length === 0) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({
+            success: false,
+            message: `Activo con placa o identificador ${curPlaca} no encontrado.`
+          });
+        }
+
+        const activoActual = activoRes.rows[0];
+
+        const prestamoRes = await client.query(
+          `INSERT INTO prestamos (
+              placa_activo,
+              tipo_item,
+              cantidad,
+              solicitante,
+              sede,
+              motivo,
+              fecha_salida,
+              fecha_devolucion_esperada,
+              estado,
+              usuario_id,
+              custodio_documento,
+              solicitante_documento
+            )
+            VALUES ($1, 'activo', 1, $2, $3, $4, COALESCE($5::date, CURRENT_DATE), $6, 'Activo', $7, $8, $8)
+            RETURNING *`,
+          [
+            activoActual.placa,
+            finalNombreCustodio,
+            finalSede,
+            finalMotivo,
+            fecha_salida || fecha_prestamo || null,
+            finalFechaDevolucion,
+            finalUsuarioId,
+            finalCustodioDoc
+          ]
+        );
+
+        // Actualizar el estado del activo físico a 'En campo' / 'EN_PRESTAMO'
+        await client.query(
+          `UPDATE activos
+            SET estado = 'En campo',
+                custodio = $1,
+                fecha_devolucion = $2,
+                custodio_documento = $3,
+                usuario_id = $4
+            WHERE placa = $5`,
+          [finalNombreCustodio, finalFechaDevolucion, finalCustodioDoc, finalUsuarioId, activoActual.placa]
+        );
+
+        prestamoInsertado = prestamoRes.rows[0];
+        prestamoInsertado.nombre_activo = activoActual.nombre;
+        if (solicitud_id || solicitudId) {
+          prestamoInsertado.solicitud_id = solicitud_id || solicitudId;
+        }
       }
+
+      // Registrar auditoría en historial_movimientos
+      await registrarMovimiento(client, {
+        tipo: 'Préstamo',
+        elemento_nombre: prestamoInsertado.nombre_activo || curPlaca,
+        placa_o_id: curPlaca,
+        cantidad: finalCantidad,
+        responsable: finalNombreCustodio,
+        sede: finalSede,
+        fecha: new Date().toISOString(),
+        detalles: finalMotivo,
+        usuario_id: finalUsuarioId
+      });
+
+      prestamosInsertados.push(prestamoInsertado);
     }
 
-    let prestamoInsertado;
-
-    if (detectedTipo === 'consumible') {
-      // 1. Verificar consumible y stock disponible
-      const consRes = await client.query(
-        'SELECT * FROM consumibles WHERE LOWER(id) = LOWER($1) FOR UPDATE',
-        [finalItemId]
-      );
-
-      if (consRes.rows.length === 0) {
-        await client.query('ROLLBACK');
-        return res.status(404).json({
-          success: false,
-          message: `Consumible/insumo con código ${finalItemId} no encontrado.`
-        });
+    // Si viene asociado a una solicitud_id, actualizar estado de la solicitud a 'APROBADA'
+    const targetSolId = solicitud_id || solicitudId;
+    if (targetSolId) {
+      try {
+        await client.query(
+          `UPDATE solicitudes_inventario 
+            SET estado = 'APROBADA'
+            WHERE id::text = $1`,
+          [String(targetSolId)]
+        );
+      } catch (solErr) {
+        console.warn('Aviso actualizando solicitud asociada a préstamo:', solErr.message);
       }
-
-      const consumibleActual = consRes.rows[0];
-      const stockDisponible = parseInt(consumibleActual.disponible, 10) || 0;
-
-      if (stockDisponible < finalCantidad) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({
-          success: false,
-          message: `Stock insuficiente para ${consumibleActual.material} (Solicitado: ${finalCantidad}, Disponible: ${stockDisponible})`
-        });
-      }
-
-      // 2. Descontar stock disponible en tabla consumibles
-      await client.query(
-        'UPDATE consumibles SET disponible = disponible - $1 WHERE id = $2 AND disponible >= $1',
-        [finalCantidad, consumibleActual.id]
-      );
-
-      // 3. Insertar préstamo con tipo_item = consumible, usuario_id y custodio_documento
-      const prestamoRes = await client.query(
-        `INSERT INTO prestamos (
-            placa_activo,
-            tipo_item,
-            cantidad,
-            solicitante,
-            sede,
-            motivo,
-            fecha_salida,
-            fecha_devolucion_esperada,
-            estado,
-            usuario_id,
-            custodio_documento,
-            solicitante_documento
-          )
-          VALUES ($1, 'consumible', $2, $3, $4, $5, COALESCE($6::date, CURRENT_DATE), $7, 'Activo', $8, $9, $9)
-          RETURNING *`,
-        [
-          consumibleActual.id,
-          finalCantidad,
-          finalNombreCustodio,
-          finalSede,
-          motivo,
-          fecha_salida || null,
-          finalFechaDevolucion,
-          finalUsuarioId,
-          finalCustodioDoc
-        ]
-      );
-
-      prestamoInsertado = prestamoRes.rows[0];
-      prestamoInsertado.nombre_activo = consumibleActual.material;
-    } else {
-      // Flujo de Activo Tecnológico
-      const activoRes = await client.query(
-        'SELECT * FROM activos WHERE LOWER(placa) = LOWER($1) FOR UPDATE',
-        [finalItemId]
-      );
-
-      if (activoRes.rows.length === 0) {
-        await client.query('ROLLBACK');
-        return res.status(404).json({
-          success: false,
-          message: `Activo con placa ${finalItemId} no encontrado.`
-        });
-      }
-
-      const activoActual = activoRes.rows[0];
-
-      const prestamoRes = await client.query(
-        `INSERT INTO prestamos (
-            placa_activo,
-            tipo_item,
-            cantidad,
-            solicitante,
-            sede,
-            motivo,
-            fecha_salida,
-            fecha_devolucion_esperada,
-            estado,
-            usuario_id,
-            custodio_documento,
-            solicitante_documento
-          )
-          VALUES ($1, 'activo', 1, $2, $3, $4, COALESCE($5::date, CURRENT_DATE), $6, 'Activo', $7, $8, $8)
-          RETURNING *`,
-        [
-          activoActual.placa,
-          finalNombreCustodio,
-          finalSede,
-          motivo,
-          fecha_salida || null,
-          finalFechaDevolucion,
-          finalUsuarioId,
-          finalCustodioDoc
-        ]
-      );
-
-      await client.query(
-        `UPDATE activos
-          SET estado = 'En campo',
-              custodio = $1,
-              fecha_devolucion = $2,
-              custodio_documento = $3,
-              usuario_id = $4
-          WHERE placa = $5`,
-        [finalNombreCustodio, finalFechaDevolucion, finalCustodioDoc, finalUsuarioId, activoActual.placa]
-      );
-
-      prestamoInsertado = prestamoRes.rows[0];
-      prestamoInsertado.nombre_activo = activoActual.nombre;
     }
-
-    // Registrar en historial_movimientos dentro de la transacción atómica
-    await registrarMovimiento(client, {
-      tipo: 'Préstamo',
-      elemento_nombre: prestamoInsertado.nombre_activo || finalItemId,
-      placa_o_id: finalItemId,
-      cantidad: finalCantidad,
-      responsable: finalNombreCustodio,
-      sede: finalSede,
-      fecha: new Date().toISOString(),
-      detalles: motivo || 'Préstamo operativo asignado',
-      usuario_id: finalUsuarioId
-    });
 
     await client.query('COMMIT');
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message: 'Préstamo registrado exitosamente y stock/activo actualizado con custodio verificado',
-      data: prestamoInsertado
+      data: prestamosInsertados.length === 1 ? prestamosInsertados[0] : prestamosInsertados
     });
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Error al crear préstamo en DB:', error);
     const status = error.statusCode || 500;
-    res.status(status).json({ success: false, error: error.message });
+    return res.status(status).json({ success: false, error: error.message });
   } finally {
     client.release();
   }
@@ -2223,6 +2285,50 @@ const handleUpdateSolicitud = async (req, res) => {
 
 router.put('/solicitudes/:id', requireOperadorOAdmin, handleUpdateSolicitud);
 router.patch('/solicitudes/:id', requireOperadorOAdmin, handleUpdateSolicitud);
+
+// PATCH /api/solicitudes/:id/rechazar - Endpoint específico para rechazar una solicitud
+router.patch('/solicitudes/:id/rechazar', requireOperadorOAdmin, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { motivo_rechazo, motivoRechazo, observaciones_admin, justificacion } = req.body || {};
+    const motivoFinal = (motivo_rechazo || motivoRechazo || observaciones_admin || justificacion || 'Solicitud rechazada por administración').toString().trim();
+
+    const query = `
+      UPDATE solicitudes_inventario
+      SET estado = 'RECHAZADA',
+          observaciones_admin = $1
+      WHERE id::text = $2
+      RETURNING *;
+    `;
+
+    const result = await client.query(query, [motivoFinal, String(id)]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Solicitud no encontrada.'
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Solicitud rechazada exitosamente',
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error al rechazar solicitud:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Error al rechazar solicitud',
+      error: error.message
+    });
+  } finally {
+    client.release();
+  }
+});
+
+// PATCH /api/solicitudes/:id/estado - Endpoint específico para cambiar estado
+router.patch('/solicitudes/:id/estado', requireOperadorOAdmin, handleUpdateSolicitud);
 
 // ==========================================
 // 5. GESTIÓN DE USUARIOS Y PERFILES

@@ -109,4 +109,74 @@ describe('Suite de Pruebas: POST /api/solicitudes (Radicación de Solicitudes)',
     expect(res.body.message).toBe('Error al registrar la solicitud');
     expect(res.body.error).toContain('Database connection failed');
   });
+
+  it('debe rechazar una solicitud con PATCH /api/solicitudes/:id/rechazar', async () => {
+    // 1. Crear solicitud previa
+    const createRes = await request(app)
+      .post('/api/solicitudes')
+      .set('Authorization', `Bearer ${validToken}`)
+      .send({
+        sede: 'Medellín',
+        tipo_solicitud: 'PRESTAMO_EQUIPO',
+        motivo: 'Solicitud para prueba de rechazo'
+      });
+
+    expect(createRes.status).toBe(201);
+    const solicitudId = createRes.body.data.id;
+
+    // 2. Rechazar la solicitud
+    const rejectRes = await request(app)
+      .patch(`/api/solicitudes/${solicitudId}/rechazar`)
+      .set('Authorization', `Bearer ${validToken}`)
+      .send({
+        motivo_rechazo: 'No hay disponibilidad de equipos'
+      });
+
+    expect(rejectRes.status).toBe(200);
+    expect(rejectRes.body.success).toBe(true);
+    expect(rejectRes.body.message).toMatch(/Solicitud rechazada/i);
+    expect(rejectRes.body.data.estado).toBe('RECHAZADA');
+    expect(rejectRes.body.data.observaciones_admin).toBe('No hay disponibilidad de equipos');
+  });
+
+  it('debe aprobar y despachar préstamo con POST /api/prestamos actualizando la solicitud y activo', async () => {
+    // 1. Crear solicitud
+    const createRes = await request(app)
+      .post('/api/solicitudes')
+      .set('Authorization', `Bearer ${validToken}`)
+      .send({
+        sede: 'Medellín',
+        tipo_solicitud: 'PRESTAMO_EQUIPO',
+        motivo: 'Solicitud para prueba de despacho',
+        fecha_devolucion_estimada: '2026-11-20'
+      });
+
+    expect(createRes.status).toBe(201);
+    const solicitudId = createRes.body.data.id;
+
+    // 2. Despachar préstamo con proyecto_id null (o sin proyecto específico)
+    const prestamoPayload = {
+      solicitud_id: solicitudId,
+      proyecto_id: null,
+      itemId: 'ACT-FMO-001',
+      unitCodes: ['ACT-FMO-001'],
+      responsable: 'Santiago Galeano',
+      sede: 'Medellín',
+      motivo: 'Taller presencial'
+    };
+
+    const prestamoRes = await request(app)
+      .post('/api/prestamos')
+      .set('Authorization', `Bearer ${validToken}`)
+      .send(prestamoPayload);
+
+    expect(prestamoRes.status).toBe(201);
+    expect(prestamoRes.body.success).toBe(true);
+    expect(prestamoRes.body.data.solicitud_id).toBe(solicitudId);
+
+    // 3. Verificar que la solicitud pasó a APROBADA
+    const verifySol = await pool.query('SELECT estado FROM solicitudes_inventario WHERE id = $1', [solicitudId]);
+    expect(verifySol.rows[0].estado).toBe('APROBADA');
+  });
 });
+
