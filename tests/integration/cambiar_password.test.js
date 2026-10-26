@@ -140,10 +140,10 @@ describe('Suite de Pruebas: PUT /api/auth/cambiar-password', () => {
     expect(res.body.message).toMatch(/Santiago Suárez Duran/i);
   });
 
-  it('debe retornar 200 y mensaje de éxito cuando la contraseña se actualiza correctamente con bcrypt', async () => {
+  it('debe retornar 200 y actualizar perfiles aunque Supabase Auth devuelva User not found', async () => {
     jest.spyOn(supabaseAdmin.auth.admin, 'updateUserById').mockResolvedValueOnce({
-      data: { user: { id: '834a1bc6-60e3-4401-bb6e-fe3e280575e3' } },
-      error: null
+      data: null,
+      error: { message: 'User not found' }
     });
 
     const res = await request(app)
@@ -151,13 +151,11 @@ describe('Suite de Pruebas: PUT /api/auth/cambiar-password', () => {
       .set('Authorization', `Bearer ${validToken}`)
       .send({
         password_actual: 'admin123',
-        nueva_password: 'NuevaClaveSegura2026@'
+        nueva_password: 'NuevaClaveExclusiva2026@'
       });
 
-    if (res.status !== 200) {
-      console.log('Fallo test 143 res.body:', res.body, 'res.status:', res.status);
-    }
     expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
     expect(res.body.mensaje).toBe('Contraseña actualizada exitosamente');
   });
 

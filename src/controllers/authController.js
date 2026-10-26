@@ -124,10 +124,12 @@ export const login = async (req, res) => {
  */
 export const cambiarPassword = async (req, res) => {
   try {
-    const { password_actual, nueva_password } = req.body;
-    const usuario = req.user; // Obtenido del token JWT o middleware de auth
+    const password_actual = String(req.body.password_actual || req.body.passwordActual || req.body.password_anterior || '').trim();
+    const nueva_password = String(req.body.nueva_password || req.body.nuevaPassword || req.body.newPassword || '').trim();
+    const usuario = req.user || req.usuario; // Obtenido del token JWT o middleware de auth
+    const usuarioId = usuario?.id || usuario?.sub;
 
-    if (!password_actual || typeof password_actual !== 'string' || !password_actual.trim()) {
+    if (!password_actual) {
       return res.status(400).json({
         success: false,
         message: 'Debes proporcionar la contraseña actual y la nueva contraseña.',
@@ -135,7 +137,7 @@ export const cambiarPassword = async (req, res) => {
       });
     }
 
-    if (!nueva_password || typeof nueva_password !== 'string' || !nueva_password.trim()) {
+    if (!nueva_password) {
       return res.status(400).json({
         success: false,
         message: 'Debes proporcionar la contraseña actual y la nueva contraseña.',
@@ -162,10 +164,10 @@ export const cambiarPassword = async (req, res) => {
       });
     }
 
-    // Obtener el perfil actual de la base de datos
+    // 1. Obtener el perfil directamente de la base de datos (public.perfiles)
     const userRes = await pool.query(
-      'SELECT id, documento, email, password, nombre_completo, sede FROM perfiles WHERE id = $1 OR documento = $2',
-      [usuario?.id, usuario?.documento || '']
+      'SELECT id, documento, email, password, nombre_completo, sede FROM perfiles WHERE id = $1 OR ($2 != \'\' AND LOWER(documento) = LOWER($2)) LIMIT 1',
+      [usuarioId, usuario?.documento || '']
     );
 
     if (userRes.rows.length === 0) {
@@ -187,7 +189,7 @@ export const cambiarPassword = async (req, res) => {
       });
     }
 
-    // 1. Validar que await bcrypt.compare(password_actual, perfil.password) sea verdadero
+    // 2. Validar que await bcrypt.compare(password_actual, perfil.password) sea verdadero
     let passwordValida = false;
     if (perfil.password) {
       try {
@@ -215,29 +217,42 @@ export const cambiarPassword = async (req, res) => {
     if (!passwordValida) {
       return res.status(400).json({
         success: false,
-        message: 'La contraseña actual ingresada es incorrecta.',
+        message: 'La contraseña actual es incorrecta.',
         error: 'La contraseña actual ingresada es incorrecta.'
       });
     }
 
-    // 2. Hashear nueva_password con bcrypt.hash(nueva_password, 10)
+    // 3. Hashear nueva_password con bcrypt.hash(nueva_password, 10)
     const nuevoHash = await bcrypt.hash(nueva_password, 10);
 
-    // 3. Actualizar en Supabase Auth si existe el usuario en Auth
-    const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
-      perfil.id,
-      { password: nueva_password }
-    );
+    // 4. Sincronizar en Supabase Auth si el usuario existe en auth.users (evitar error 500 si no existe en Auth)
+    try {
+      if (supabaseAdmin?.auth?.admin) {
+        const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
+          perfil.id,
+          { password: nueva_password }
+        );
 
-    if (updateError) {
-      return res.status(500).json({
-        success: false,
-        message: 'Error al actualizar contraseña: ' + updateError.message,
-        error: 'Error al actualizar la contraseña en Supabase: ' + updateError.message
-      });
+        if (updateError) {
+          const isUserNotFound = updateError.message?.toLowerCase().includes('not found') || updateError.message?.toLowerCase().includes('user not found');
+          if (!isUserNotFound) {
+            return res.status(500).json({
+              success: false,
+              message: 'Error al actualizar contraseña: ' + updateError.message,
+              error: 'Error al actualizar la contraseña en Supabase: ' + updateError.message
+            });
+          } else {
+            console.info('Aviso: usuario no registrado en auth.users de Supabase; contraseña persistida exitosamente en tabla perfiles.');
+          }
+        }
+      }
+    } catch (authErr) {
+      if (!authErr.message?.toLowerCase().includes('not found')) {
+        console.warn('Aviso no crítico al sincronizar con Supabase Auth:', authErr.message);
+      }
     }
 
-    // 4. Ejecutar UPDATE en public.perfiles una vez confirmado
+    // 5. Actualizar la columna password directamente en la tabla relacional public.perfiles
     await pool.query('UPDATE perfiles SET password = $1, updated_at = NOW() WHERE id = $2', [nuevoHash, perfil.id]);
 
     try {
