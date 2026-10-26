@@ -544,81 +544,79 @@ const handleUpdateActivo = async (req, res, next) => {
       usuario_id
     } = req.body;
 
-    const nombreFinal = nombre !== undefined ? nombre : (equipo !== undefined ? equipo : null);
-    const ubicacionFinal = ubicacion !== undefined ? ubicacion : (sede !== undefined ? sede : null);
-    const responsableFinal = responsable !== undefined ? responsable : (custodio !== undefined ? custodio : null);
+    const nombreFinal = nombre !== undefined ? nombre : (equipo !== undefined ? equipo : undefined);
+    const ubicacionFinal = ubicacion !== undefined ? ubicacion : (sede !== undefined ? sede : undefined);
+    const responsableFinal = responsable !== undefined ? responsable : (custodio !== undefined ? custodio : undefined);
 
     const isNumericId = /^\d+$/.test(paramId);
 
-    // 2. Consulta SQL con COALESCE y RETURNING *
+    const updates = [];
+    const values = [];
+    let pIdx = 1;
+
+    const addField = (col, val) => {
+      updates.push(`${col} = $${pIdx++}`);
+      values.push(val);
+    };
+
+    if (nombreFinal !== undefined) addField('nombre', nombreFinal ? nombreFinal.trim() : null);
+    if (categoria !== undefined) addField('categoria', categoria ? categoria.trim() : null);
+    if (condicion !== undefined) addField('condicion', condicion ? condicion.trim() : null);
+    if (area !== undefined) addField('area', area ? area.trim() : null);
+    if (ubicacionFinal !== undefined) addField('ubicacion', ubicacionFinal ? ubicacionFinal.trim() : null);
+    if (cantidad !== undefined && cantidad !== '') addField('cantidad', parseInt(cantidad, 10) || 1);
+    if (descripcion !== undefined) addField('descripcion', descripcion ? descripcion.trim() : null);
+    if (marca !== undefined) addField('marca', marca ? marca.trim() : null);
+    if (modelo !== undefined) addField('modelo', modelo ? modelo.trim() : null);
+    if (serial !== undefined) addField('serial', serial ? serial.trim() : null);
+    if (caracteristica_1 !== undefined) addField('caracteristica_1', caracteristica_1 ? caracteristica_1.trim() : null);
+    if (caracteristica_2 !== undefined) addField('caracteristica_2', caracteristica_2 ? caracteristica_2.trim() : null);
+    if (caracteristica_3 !== undefined) addField('caracteristica_3', caracteristica_3 ? caracteristica_3.trim() : null);
+    if (responsableFinal !== undefined) addField('responsable', responsableFinal ? responsableFinal.trim() : null);
+    if (proveedor !== undefined) addField('proveedor', proveedor ? proveedor.trim() : null);
+    if (valor_compra !== undefined) addField('valor_compra', valor_compra !== '' && valor_compra !== null ? valor_compra : null);
+    if (valor_total !== undefined) addField('valor_total', valor_total !== '' && valor_total !== null ? valor_total : null);
+    if (fecha_compra !== undefined) addField('fecha_compra', fecha_compra || null);
+    if (fecha_vencimiento_garantia !== undefined) addField('fecha_vencimiento_garantia', fecha_vencimiento_garantia || null);
+    if (claves_otros !== undefined) addField('claves_otros', claves_otros ? claves_otros.trim() : null);
+    if (observaciones !== undefined) addField('observaciones', observaciones ? observaciones.trim() : null);
+    if (estado !== undefined) addField('estado', estado ? estado.trim() : null);
+    if (custodio !== undefined) addField('custodio', custodio ? custodio.trim() : null);
+    if (fecha_devolucion !== undefined) addField('fecha_devolucion', fecha_devolucion || null);
+    if (sede !== undefined) addField('sede', sede ? sede.trim() : null);
+    if (ubicacion_estante !== undefined) addField('ubicacion_estante', ubicacion_estante ? ubicacion_estante.trim() : null);
+    if (tipo_inventario !== undefined) addField('tipo_inventario', tipo_inventario ? tipo_inventario.trim() : null);
+    if (custodio_documento !== undefined) addField('custodio_documento', custodio_documento ? custodio_documento.trim() : null);
+    if (usuario_id !== undefined) addField('usuario_id', usuario_id || null);
+
+    if (updates.length === 0) {
+      const currentRes = await pool.query(
+        isNumericId 
+          ? 'SELECT * FROM activos WHERE id = $1 OR LOWER(placa) = LOWER($2)' 
+          : 'SELECT * FROM activos WHERE LOWER(placa) = LOWER($1)',
+        isNumericId ? [parseInt(paramId, 10), paramId] : [paramId]
+      );
+      if (currentRes.rows.length === 0) {
+        return res.status(404).json({ success: false, message: `Activo con identificador "${paramId}" no encontrado.` });
+      }
+      return res.json({ success: true, data: currentRes.rows[0], message: 'Sin cambios requeridos' });
+    }
+
+    let whereClause;
+    if (isNumericId) {
+      whereClause = `(id = $${pIdx} OR LOWER(placa) = LOWER($${pIdx + 1}))`;
+      values.push(parseInt(paramId, 10), paramId);
+    } else {
+      whereClause = `LOWER(placa) = LOWER($${pIdx})`;
+      values.push(paramId);
+    }
+
     const updateQuery = `
       UPDATE activos SET
-        nombre = COALESCE($1, nombre),
-        categoria = COALESCE($2, categoria),
-        condicion = COALESCE($3, condicion),
-        area = COALESCE($4, area),
-        ubicacion = COALESCE($5, ubicacion),
-        cantidad = COALESCE($6, cantidad),
-        descripcion = COALESCE($7, descripcion),
-        marca = COALESCE($8, marca),
-        modelo = COALESCE($9, modelo),
-        serial = COALESCE($10, serial),
-        caracteristica_1 = COALESCE($11, caracteristica_1),
-        caracteristica_2 = COALESCE($12, caracteristica_2),
-        caracteristica_3 = COALESCE($13, caracteristica_3),
-        responsable = COALESCE($14, responsable),
-        proveedor = COALESCE($15, proveedor),
-        valor_compra = COALESCE($16, valor_compra),
-        valor_total = COALESCE($17, valor_total),
-        fecha_compra = COALESCE($18, fecha_compra),
-        fecha_vencimiento_garantia = COALESCE($19, fecha_vencimiento_garantia),
-        claves_otros = COALESCE($20, claves_otros),
-        observaciones = COALESCE($21, observaciones),
-        estado = COALESCE($22, estado),
-        custodio = COALESCE($23, custodio),
-        fecha_devolucion = COALESCE($24, fecha_devolucion),
-        sede = COALESCE($25, sede),
-        ubicacion_estante = COALESCE($26, ubicacion_estante),
-        tipo_inventario = COALESCE($27, tipo_inventario),
-        custodio_documento = COALESCE($28, custodio_documento),
-        usuario_id = COALESCE($29, usuario_id)
-      WHERE ${isNumericId ? '(id = $30 OR LOWER(placa) = LOWER($31))' : 'LOWER(placa) = LOWER($30)'}
+        ${updates.join(', ')}
+      WHERE ${whereClause}
       RETURNING *;
     `;
-
-    const values = [
-      nombreFinal,
-      categoria !== undefined ? categoria : null,
-      condicion !== undefined ? condicion : null,
-      area !== undefined ? area : null,
-      ubicacionFinal,
-      cantidad !== undefined && cantidad !== '' ? parseInt(cantidad, 10) : null,
-      descripcion !== undefined ? descripcion : null,
-      marca !== undefined ? marca : null,
-      modelo !== undefined ? modelo : null,
-      serial !== undefined ? (serial ? serial.trim() : null) : null,
-      caracteristica_1 !== undefined ? caracteristica_1 : null,
-      caracteristica_2 !== undefined ? caracteristica_2 : null,
-      caracteristica_3 !== undefined ? caracteristica_3 : null,
-      responsableFinal,
-      proveedor !== undefined ? proveedor : null,
-      valor_compra !== undefined && valor_compra !== '' ? valor_compra : null,
-      valor_total !== undefined && valor_total !== '' ? valor_total : null,
-      fecha_compra !== undefined && fecha_compra !== '' ? fecha_compra : null,
-      fecha_vencimiento_garantia !== undefined && fecha_vencimiento_garantia !== '' ? fecha_vencimiento_garantia : null,
-      claves_otros !== undefined ? claves_otros : null,
-      observaciones !== undefined ? observaciones : null,
-      estado !== undefined ? estado : null,
-      custodio !== undefined ? custodio : null,
-      fecha_devolucion !== undefined && fecha_devolucion !== '' ? fecha_devolucion : null,
-      sede !== undefined ? sede : null,
-      ubicacion_estante !== undefined ? ubicacion_estante : null,
-      tipo_inventario !== undefined ? tipo_inventario : null,
-      custodio_documento !== undefined ? custodio_documento : null,
-      usuario_id !== undefined ? usuario_id : null,
-      isNumericId ? parseInt(paramId, 10) : paramId.toLowerCase(),
-      ...(isNumericId ? [paramId.toLowerCase()] : [])
-    ];
 
     const result = await pool.query(updateQuery, values);
 
@@ -1730,11 +1728,399 @@ const handleDevolverPrestamo = async (req, res, next) => {
   }
 };
 
+// PUT/PATCH /api/prestamos/:id - Actualizar datos de préstamo activo/registrado
+const handleUpdatePrestamo = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    if (!id || isNaN(parseInt(id, 10))) {
+      return res.status(400).json({ success: false, message: 'ID de préstamo inválido o no numérico.' });
+    }
+    const prestamoId = parseInt(id, 10);
+
+    const checkRes = await client.query('SELECT * FROM prestamos WHERE id = $1', [prestamoId]);
+    if (checkRes.rows.length === 0) {
+      return res.status(404).json({ success: false, message: `Préstamo con ID ${prestamoId} no encontrado.` });
+    }
+    const prestamoActual = checkRes.rows[0];
+
+    const {
+      solicitante,
+      responsable,
+      sede,
+      motivo,
+      fecha_salida,
+      fecha_devolucion_esperada,
+      fecha_devolucion_real,
+      estado,
+      tipo_item,
+      cantidad,
+      solicitante_documento,
+      custodio_documento,
+      usuario_id
+    } = req.body;
+
+    let finalUsuarioId = prestamoActual.usuario_id;
+    let finalCustodioDoc = prestamoActual.custodio_documento;
+    let finalSolicitante = solicitante !== undefined ? (solicitante || '').trim() : (responsable !== undefined ? (responsable || '').trim() : prestamoActual.solicitante);
+
+    if (usuario_id !== undefined || custodio_documento !== undefined || solicitante_documento !== undefined || (solicitante !== undefined && solicitante !== prestamoActual.solicitante)) {
+      const uRes = await resolverUsuarioCustodio(client, {
+        usuario_id: usuario_id !== undefined ? usuario_id : prestamoActual.usuario_id,
+        custodio_documento: custodio_documento || solicitante_documento || prestamoActual.custodio_documento || prestamoActual.solicitante_documento,
+        solicitante: finalSolicitante
+      });
+      if (uRes) {
+        finalUsuarioId = uRes.id;
+        finalCustodioDoc = uRes.documento;
+        if (!finalSolicitante) finalSolicitante = uRes.nombre_completo;
+      } else {
+        if (usuario_id !== undefined) finalUsuarioId = usuario_id || null;
+        if (custodio_documento !== undefined || solicitante_documento !== undefined) {
+          finalCustodioDoc = custodio_documento || solicitante_documento || null;
+        }
+      }
+    }
+
+    const updates = [];
+    const values = [];
+    let pIdx = 1;
+
+    const addField = (col, val) => {
+      updates.push(`${col} = $${pIdx++}`);
+      values.push(val);
+    };
+
+    if (finalSolicitante !== undefined) addField('solicitante', finalSolicitante);
+    if (sede !== undefined) addField('sede', sede ? sede.trim() : null);
+    if (motivo !== undefined) addField('motivo', motivo ? motivo.trim() : null);
+    if (fecha_salida !== undefined) addField('fecha_salida', fecha_salida || null);
+    if (fecha_devolucion_esperada !== undefined) addField('fecha_devolucion_esperada', fecha_devolucion_esperada || null);
+    if (fecha_devolucion_real !== undefined) addField('fecha_devolucion_real', fecha_devolucion_real || null);
+    if (estado !== undefined) addField('estado', estado ? estado.trim() : prestamoActual.estado);
+    if (tipo_item !== undefined) addField('tipo_item', tipo_item ? tipo_item.trim() : prestamoActual.tipo_item);
+    if (cantidad !== undefined && cantidad !== '') addField('cantidad', Math.max(1, parseInt(cantidad, 10) || 1));
+    if (solicitante_documento !== undefined || custodio_documento !== undefined) {
+      addField('solicitante_documento', finalCustodioDoc);
+      addField('custodio_documento', finalCustodioDoc);
+    }
+    if (usuario_id !== undefined || finalUsuarioId !== prestamoActual.usuario_id) {
+      addField('usuario_id', finalUsuarioId);
+    }
+
+    if (updates.length === 0) {
+      return res.json({ success: true, message: 'Sin cambios requeridos', data: prestamoActual });
+    }
+
+    values.push(prestamoId);
+    const updateQuery = `
+      UPDATE prestamos 
+      SET ${updates.join(', ')}
+      WHERE id = $${pIdx}
+      RETURNING *;
+    `;
+
+    const result = await client.query(updateQuery, values);
+    const prestamoModificado = result.rows[0];
+
+    const enrichedQuery = `
+      SELECT 
+        p.*,
+        COALESCE(a.nombre, c.material, p.placa_activo) as nombre_activo,
+        a.marca,
+        a.modelo,
+        c.categoria as categoria_consumible,
+        u.documento as usuario_documento,
+        u.nombre_completo as usuario_nombre,
+        u.email as usuario_email,
+        u.rol as usuario_rol,
+        u.telefono as usuario_telefono
+      FROM prestamos p
+      LEFT JOIN activos a ON LOWER(p.placa_activo) = LOWER(a.placa)
+      LEFT JOIN consumibles c ON LOWER(p.placa_activo) = LOWER(c.id)
+      LEFT JOIN perfiles u ON p.usuario_id = u.id OR (p.usuario_id IS NULL AND LOWER(p.custodio_documento) = LOWER(u.documento))
+      WHERE p.id = $1
+    `;
+    const enrichedRes = await client.query(enrichedQuery, [prestamoId]);
+
+    try {
+      await registrarMovimiento(client, {
+        tipo: 'Actualización',
+        elemento_nombre: enrichedRes.rows[0]?.nombre_activo || `Préstamo #${prestamoId}`,
+        placa_o_id: prestamoModificado.placa_activo,
+        cantidad: prestamoModificado.cantidad || 1,
+        responsable: prestamoModificado.solicitante || 'Operador',
+        sede: prestamoModificado.sede || 'Medellín',
+        detalles: `Modificación de datos de préstamo #${prestamoId}: ${req.body?.motivo || 'Actualización de registro'}`
+      });
+    } catch (eAud) {
+      console.warn('Aviso: no se pudo registrar movimiento de auditoría para préstamo:', eAud.message);
+    }
+
+    res.json({
+      success: true,
+      message: 'Préstamo actualizado con éxito.',
+      data: enrichedRes.rows[0] || prestamoModificado
+    });
+  } catch (error) {
+    console.error('Error al actualizar préstamo:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  } finally {
+    client.release();
+  }
+};
+
+router.get('/prestamos/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id || isNaN(parseInt(id, 10))) {
+      return res.status(400).json({ success: false, message: 'ID de préstamo inválido.' });
+    }
+    const query = `
+      SELECT 
+        p.*,
+        COALESCE(a.nombre, c.material, p.placa_activo) as nombre_activo,
+        a.marca,
+        a.modelo,
+        c.categoria as categoria_consumible,
+        u.documento as usuario_documento,
+        u.nombre_completo as usuario_nombre,
+        u.email as usuario_email,
+        u.rol as usuario_rol,
+        u.telefono as usuario_telefono
+      FROM prestamos p
+      LEFT JOIN activos a ON LOWER(p.placa_activo) = LOWER(a.placa)
+      LEFT JOIN consumibles c ON LOWER(p.placa_activo) = LOWER(c.id)
+      LEFT JOIN perfiles u ON p.usuario_id = u.id OR (p.usuario_id IS NULL AND LOWER(p.custodio_documento) = LOWER(u.documento))
+      WHERE p.id = $1
+    `;
+    const result = await pool.query(query, [parseInt(id, 10)]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Préstamo no encontrado.' });
+    }
+    res.json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 router.put('/prestamos/:id/devolver', requireOperadorOAdmin, handleDevolverPrestamo);
 router.put('/prestamos/:id/retorno', requireOperadorOAdmin, handleDevolverPrestamo);
+router.put('/prestamos/:id', requireOperadorOAdmin, handleUpdatePrestamo);
+router.patch('/prestamos/:id', requireOperadorOAdmin, handleUpdatePrestamo);
 
 // ==========================================
-// 4. GESTIÓN DE USUARIOS Y PERFILES
+// 4. GESTIÓN DE SOLICITUDES DE INVENTARIO
+// ==========================================
+
+// GET /api/solicitudes - Listar todas las solicitudes con ítems relacionales
+router.get('/solicitudes', async (req, res) => {
+  try {
+    const { usuario_id, estado, sede } = req.query;
+    let query = `
+      SELECT 
+        s.*,
+        u.nombre_completo as usuario_nombre_perfil,
+        u.documento as usuario_documento,
+        u.email as usuario_email,
+        ps.nombre as proyecto_steam_nombre,
+        COALESCE(
+          json_agg(
+            json_build_object(
+              'id', i.id,
+              'tipo_item', i.tipo_item,
+              'item_id', i.item_id,
+              'nombre_item', i.nombre_item,
+              'cantidad', i.cantidad
+            )
+          ) FILTER (WHERE i.id IS NOT NULL), '[]'::json
+        ) as items
+      FROM solicitudes_inventario s
+      LEFT JOIN perfiles u ON s.usuario_id = u.id
+      LEFT JOIN proyectos_steam ps ON s.proyecto_steam_id = ps.id
+      LEFT JOIN items_solicitud i ON s.id = i.solicitud_id
+    `;
+    const conditions = [];
+    const values = [];
+    let idx = 1;
+
+    if (usuario_id) {
+      conditions.push(`s.usuario_id = $${idx++}`);
+      values.push(usuario_id);
+    }
+    if (estado) {
+      conditions.push(`LOWER(s.estado) = LOWER($${idx++})`);
+      values.push(estado);
+    }
+    if (sede) {
+      conditions.push(`LOWER(s.sede) = LOWER($${idx++})`);
+      values.push(sede);
+    }
+
+    if (conditions.length > 0) {
+      query += ` WHERE ${conditions.join(' AND ')}`;
+    }
+
+    query += ` GROUP BY s.id, u.id, ps.id ORDER BY s.creado_en DESC`;
+
+    const result = await pool.query(query, values);
+    res.json({ success: true, data: result.rows || [] });
+  } catch (error) {
+    console.error('Error al consultar solicitudes:', error.message);
+    res.status(500).json({ success: false, data: [], error: error.message });
+  }
+});
+
+// POST /api/solicitudes - Crear solicitud con persistencia atómica en Supabase/PostgreSQL
+router.post('/solicitudes', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const {
+      usuario_id,
+      usuario_nombre,
+      sede = 'Medellín',
+      tipo_solicitud = 'Préstamo',
+      proyecto_steam_id,
+      motivo = '',
+      fecha_devolucion_estimada,
+      items = []
+    } = req.body;
+
+    await client.query('BEGIN');
+
+    const solInsert = `
+      INSERT INTO solicitudes_inventario (
+        id, usuario_id, usuario_nombre, sede, tipo_solicitud, proyecto_steam_id, motivo, fecha_devolucion_estimada, estado, creado_en
+      ) VALUES (
+        gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, 'PENDIENTE', NOW()
+      ) RETURNING *;
+    `;
+
+    const solRes = await client.query(solInsert, [
+      usuario_id || null,
+      usuario_nombre || 'Usuario Solicitante',
+      sede,
+      tipo_solicitud,
+      proyecto_steam_id || null,
+      motivo,
+      fecha_devolucion_estimada || null
+    ]);
+
+    const nuevaSol = solRes.rows[0];
+    const itemsGuardados = [];
+
+    if (Array.isArray(items) && items.length > 0) {
+      for (const it of items) {
+        const itemRes = await client.query(`
+          INSERT INTO items_solicitud (
+            id, solicitud_id, tipo_item, item_id, nombre_item, cantidad
+          ) VALUES (
+            gen_random_uuid(), $1, $2, $3, $4, $5
+          ) RETURNING *;
+        `, [
+          nuevaSol.id,
+          it.tipo_item || 'activo',
+          it.item_id || null,
+          it.nombre_item || it.nombre || 'Item solicitado',
+          Math.max(1, parseInt(it.cantidad, 10) || 1)
+        ]);
+        itemsGuardados.push(itemRes.rows[0]);
+      }
+    }
+
+    await client.query('COMMIT');
+
+    res.status(201).json({
+      success: true,
+      message: 'Solicitud creada con éxito en base de datos',
+      data: {
+        ...nuevaSol,
+        items: itemsGuardados
+      }
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error al crear solicitud:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT/PATCH /api/solicitudes/:id - Modificar estado y observaciones de solicitud
+const handleUpdateSolicitud = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const {
+      estado,
+      observaciones_admin,
+      motivo,
+      fecha_devolucion_estimada,
+      sede
+    } = req.body;
+
+    const updates = [];
+    const values = [];
+    let idx = 1;
+
+    if (estado !== undefined) {
+      updates.push(`estado = $${idx++}`);
+      values.push(estado);
+    }
+    if (observaciones_admin !== undefined) {
+      updates.push(`observaciones_admin = $${idx++}`);
+      values.push(observaciones_admin ? observaciones_admin.trim() : null);
+    }
+    if (motivo !== undefined) {
+      updates.push(`motivo = $${idx++}`);
+      values.push(motivo ? motivo.trim() : null);
+    }
+    if (fecha_devolucion_estimada !== undefined) {
+      updates.push(`fecha_devolucion_estimada = $${idx++}`);
+      values.push(fecha_devolucion_estimada || null);
+    }
+    if (sede !== undefined) {
+      updates.push(`sede = $${idx++}`);
+      values.push(sede ? sede.trim() : null);
+    }
+
+    if (updates.length === 0) {
+      const current = await client.query('SELECT * FROM solicitudes_inventario WHERE id = $1', [id]);
+      return res.json({ success: true, data: current.rows[0] });
+    }
+
+    values.push(id);
+    const query = `
+      UPDATE solicitudes_inventario
+      SET ${updates.join(', ')}
+      WHERE id = $${idx}
+      RETURNING *;
+    `;
+
+    const result = await client.query(query, values);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Solicitud no encontrada.' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Solicitud actualizada con éxito',
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error al actualizar solicitud:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  } finally {
+    client.release();
+  }
+};
+
+router.put('/solicitudes/:id', requireOperadorOAdmin, handleUpdateSolicitud);
+router.patch('/solicitudes/:id', requireOperadorOAdmin, handleUpdateSolicitud);
+
+// ==========================================
+// 5. GESTIÓN DE USUARIOS Y PERFILES
 // ==========================================
 
 // GET /api/usuarios/mis-solicitudes - Solicitudes y préstamos del usuario autenticado
