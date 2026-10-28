@@ -8,18 +8,18 @@ describe('Suite de Pruebas: Seguridad - Exclusión de campos sensibles y Rate Li
 
   // 1. RATE LIMITING EN /api/auth/login
   describe('1. Rate Limiting Activo en /api/auth/login', () => {
-    it('debe bloquear con HTTP 429 al superar el límite de 10 peticiones por ventana de 15 minutos', async () => {
-      // Creamos una instancia de app con un rateLimiter configurado con max: 10 y ventana de 15 minutos para validar la respuesta exacta
+    it('debe bloquear con HTTP 429 al superar el límite de 10 peticiones por ventana de 5 minutos', async () => {
+      // Creamos una instancia de app con un rateLimiter configurado con max: 10 y ventana de 5 minutos para validar la respuesta exacta
       const testLimiter = rateLimit({
-        windowMs: 15 * 60 * 1000,
+        windowMs: 5 * 60 * 1000,
         max: 10,
         standardHeaders: true,
         legacyHeaders: false,
         statusCode: 429,
         message: {
           success: false,
-          message: 'Demasiados intentos de inicio de sesión desde esta IP. Por favor intenta de nuevo en 15 minutos.',
-          error: 'Demasiados intentos de inicio de sesión. Por favor espera 15 minutos antes de volver a intentar.'
+          message: 'Demasiados intentos de inicio de sesión desde esta IP. Por favor intenta de nuevo en 5 minutos.',
+          error: 'Demasiados intentos de inicio de sesión. Por favor espera 5 minutos antes de volver a intentar.'
         }
       });
 
