@@ -357,23 +357,119 @@ router.get('/activos', async (req, res, next) => {
   }
 });
 
-// GET /api/activos/:placa - Detalle de un activo por placa
+// Helper de Búsqueda Multimódulo en Cascada para Códigos QR
+const buscarElementoMultimodulo = async (paramId) => {
+  const cleanId = String(paramId || '').trim();
+  if (!cleanId) return null;
+
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanId);
+  const isNumeric = /^\d+$/.test(cleanId);
+
+  // Paso 1: Activos tecnológicos (TECNOLOGIA)
+  let actQuery;
+  let actParams;
+  if (isNumeric) {
+    actQuery = 'SELECT * FROM activos WHERE id = $1 OR LOWER(placa) = LOWER($2) LIMIT 1';
+    actParams = [parseInt(cleanId, 10), cleanId];
+  } else {
+    actQuery = 'SELECT * FROM activos WHERE LOWER(placa) = LOWER($1) LIMIT 1';
+    actParams = [cleanId];
+  }
+  const actRes = await pool.query(actQuery, actParams);
+  if (actRes.rows && actRes.rows.length > 0) {
+    return { tipo: 'TECNOLOGIA', item: actRes.rows[0] };
+  }
+
+  // Paso 2: Mobiliario y Enseres (MOBILIARIO)
+  let mobQuery;
+  let mobParams;
+  if (isUuid) {
+    mobQuery = 'SELECT * FROM mobiliario WHERE id = $1::uuid OR LOWER(placa) = LOWER($2) LIMIT 1';
+    mobParams = [cleanId, cleanId];
+  } else {
+    mobQuery = 'SELECT * FROM mobiliario WHERE LOWER(placa) = LOWER($1) LIMIT 1';
+    mobParams = [cleanId];
+  }
+  const mobRes = await pool.query(mobQuery, mobParams);
+  if (mobRes.rows && mobRes.rows.length > 0) {
+    return { tipo: 'MOBILIARIO', item: mobRes.rows[0] };
+  }
+
+  // Paso 3: Papelería y Guías STEAM (PAPELERIA)
+  const papRes = await pool.query(
+    'SELECT * FROM papeleria WHERE LOWER(id) = LOWER($1) OR id ILIKE $2 LIMIT 1',
+    [cleanId, `%${cleanId}%`]
+  );
+  if (papRes.rows && papRes.rows.length > 0) {
+    return { tipo: 'PAPELERIA', item: papRes.rows[0] };
+  }
+
+  // Paso 4: Consumibles y Robótica STEAM (ROBOTICA)
+  const conRes = await pool.query(
+    'SELECT * FROM consumibles WHERE LOWER(id) = LOWER($1) LIMIT 1',
+    [cleanId]
+  );
+  if (conRes.rows && conRes.rows.length > 0) {
+    return { tipo: 'ROBOTICA', item: conRes.rows[0] };
+  }
+
+  return null;
+};
+
+// GET /api/activos/publico/:id - Consulta Pública Multimódulo para Códigos QR
+router.get('/activos/publico/:id', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const resultado = await buscarElementoMultimodulo(id);
+
+    if (!resultado) {
+      return res.status(404).json({
+        success: false,
+        message: 'Elemento no encontrado en el inventario institucional'
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      tipo: resultado.tipo,
+      item: resultado.item
+    });
+  } catch (error) {
+    console.error('Error en consulta pública multimódulo:', error.message);
+    return res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// GET /api/activos/:placa - Detalle de un activo (con fallback multimódulo para compatibilidad QR)
 router.get('/activos/:placa', async (req, res, next) => {
   try {
     const { placa } = req.params;
-    const result = await pool.query(
-      'SELECT * FROM activos WHERE LOWER(placa) = LOWER($1)',
-      [placa.trim()]
-    );
+    const resultado = await buscarElementoMultimodulo(placa);
 
-    if (!result.rows || result.rows.length === 0) {
-      return res.status(404).json({ success: false, message: `Activo con placa ${placa} no encontrado` });
+    if (!resultado) {
+      return res.status(404).json({
+        success: false,
+        message: 'Elemento no encontrado en el inventario institucional'
+      });
     }
 
-    res.json({ success: true, data: result.rows[0] });
+    // Respuesta estandarizada con tipo e item, compatible también con data para clientes anteriores
+    return res.status(200).json({
+      success: true,
+      tipo: resultado.tipo,
+      item: resultado.item,
+      data: {
+        ...resultado.item,
+        tipo: resultado.tipo,
+        __tipo: resultado.tipo.toLowerCase()
+      }
+    });
   } catch (error) {
-    console.error('Error al obtener activo por placa:', error.message);
-    res.status(500).json({ success: false, error: error.message });
+    console.error('Error al obtener activo por placa/id:', error.message);
+    return res.status(500).json({ success: false, error: error.message });
   }
 });
 
