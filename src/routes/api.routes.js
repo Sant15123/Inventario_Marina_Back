@@ -1889,21 +1889,9 @@ const handleDevolverPrestamo = async (req, res, next) => {
       );
     }
 
-    // REGISTRO OBLIGATORIO Y ATÓMICO EN HISTORIAL DE MOVIMIENTOS
-    const devolucionHistorial = await registrarMovimiento(client, {
-      tipo: 'Devolución',
-      elemento_nombre: prestamo.nombre_activo || `Activo ${prestamo.placa_activo}`,
-      placa_o_id: prestamo.placa_activo,
-      cantidad: prestamo.cantidad || 1,
-      responsable: bodyResponsable || prestamo.solicitante || 'Custodio',
-      sede: bodySede || prestamo.sede || prestamo.activo_sede || 'MEDELLÍN',
-      fecha: new Date().toISOString(),
-      detalles: bodyDetalles || 'Retorno a bodega confirmado. Activo disponible.'
-    });
-
-    // Registrar auditoría de retorno en historial_movimientos
+    // REGISTRO OBLIGATORIO Y ATÓMICO EN HISTORIAL DE MOVIMIENTOS (Única inserción)
+    let nombreEquipo = prestamo.nombre_activo || `Activo ${prestamo.placa_activo}`;
     try {
-      let nombreEquipo = 'Activo tecnológico';
       if (!esConsumible) {
         const actRes = await client.query('SELECT nombre FROM activos WHERE LOWER(placa) = LOWER($1)', [prestamo.placa_activo]);
         if (actRes.rows.length > 0 && actRes.rows[0].nombre) {
@@ -1915,21 +1903,21 @@ const handleDevolverPrestamo = async (req, res, next) => {
           nombreEquipo = conRes.rows[0].material;
         }
       }
-
-      await registrarMovimiento(client, {
-        tipo: 'Devolución',
-        elemento_nombre: nombreEquipo,
-        placa_o_id: prestamo.placa_activo,
-        cantidad: Math.max(1, prestamo.cantidad || 1),
-        responsable: prestamo.solicitante,
-        sede: prestamo.sede || 'Medellín',
-        fecha: new Date().toISOString(),
-        detalles: 'Retorno a bodega confirmado. Activo disponible.',
-        usuario_id: prestamo.usuario_id || null
-      });
-    } catch (errHist) {
-      console.warn('Aviso: no se pudo registrar retorno en historial_movimientos:', errHist.message);
+    } catch (errNom) {
+      console.warn('Aviso obteniendo nombre del equipo para historial:', errNom.message);
     }
+
+    const devolucionHistorial = await registrarMovimiento(client, {
+      tipo: 'Devolución',
+      elemento_nombre: nombreEquipo,
+      placa_o_id: prestamo.placa_activo,
+      cantidad: Math.max(1, prestamo.cantidad || 1),
+      responsable: bodyResponsable || prestamo.solicitante || 'Custodio',
+      sede: bodySede || prestamo.sede || prestamo.activo_sede || 'Medellín',
+      fecha: new Date().toISOString(),
+      detalles: bodyDetalles || 'Retorno a bodega confirmado. Activo disponible.',
+      usuario_id: prestamo.usuario_id || null
+    });
 
     await client.query('COMMIT');
 
