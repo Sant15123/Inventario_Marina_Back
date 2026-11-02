@@ -2130,6 +2130,9 @@ router.get('/solicitudes', async (req, res) => {
     let query = `
       SELECT 
         s.*,
+        s.observaciones_admin as motivo_rechazo,
+        s.observaciones_admin as nota_rechazo,
+        s.observaciones_admin as justificacion_rechazo,
         u.nombre_completo as usuario_nombre_perfil,
         u.documento as usuario_documento,
         u.email as usuario_email,
