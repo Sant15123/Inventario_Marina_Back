@@ -8,6 +8,7 @@ import { requireAdminOnly, requireOperadorOAdmin } from '../middleware/roles.js'
 import { loginLimiter } from '../middleware/rateLimiter.js';
 import * as authController from '../controllers/authController.js';
 import { getDashboardKPIs } from '../controllers/dashboardController.js';
+import { actualizarPrestamo } from '../controllers/prestamosController.js';
 
 const router = Router();
 
@@ -2116,8 +2117,8 @@ router.get('/prestamos/:id', async (req, res) => {
 
 router.put('/prestamos/:id/devolver', requireOperadorOAdmin, handleDevolverPrestamo);
 router.put('/prestamos/:id/retorno', requireOperadorOAdmin, handleDevolverPrestamo);
-router.put('/prestamos/:id', requireOperadorOAdmin, handleUpdatePrestamo);
-router.patch('/prestamos/:id', requireOperadorOAdmin, handleUpdatePrestamo);
+router.put('/prestamos/:id', requireOperadorOAdmin, actualizarPrestamo);
+router.patch('/prestamos/:id', requireOperadorOAdmin, actualizarPrestamo);
 
 // ==========================================
 // 4. GESTIÓN DE SOLICITUDES DE INVENTARIO
