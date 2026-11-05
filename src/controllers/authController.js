@@ -94,7 +94,8 @@ export const login = async (req, res) => {
       email: perfil.email,
       rol: perfil.rol,
       sede: perfil.sede || 'Medellín',
-      cargo: perfil.cargo || 'Funcionario FMO'
+      cargo: perfil.cargo || 'Funcionario FMO',
+      avatar_url: perfil.avatar_url || null
     };
 
     const token = generateToken(tokenPayload);

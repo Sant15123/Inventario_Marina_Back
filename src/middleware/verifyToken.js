@@ -44,7 +44,7 @@ export function verifyToken(req, res, next) {
     if (decoded.exp && decoded.exp < now) {
       return res.status(401).json({
         success: false,
-        error: 'Sesión expirada: El token de autenticación ha caducado.'
+        error: 'Sesión expirada: El token de autenticación ha caducado tras 2 horas.'
       });
     }
 
@@ -58,7 +58,8 @@ export function verifyToken(req, res, next) {
       nombre: decoded.nombre || decoded.nombre_completo || 'Usuario SIGA',
       rol: decoded.rol ? String(decoded.rol).toLowerCase().trim() : 'usuario',
       sede: decoded.sede ? String(decoded.sede).trim() : 'Medellín',
-      cargo: decoded.cargo ? String(decoded.cargo).trim() : null
+      cargo: decoded.cargo ? String(decoded.cargo).trim() : null,
+      avatar_url: decoded.avatar_url || null
     };
 
     next();
@@ -70,7 +71,7 @@ export function verifyToken(req, res, next) {
   }
 }
 
-export function generateToken(payload, expiresInSeconds = 7 * 24 * 60 * 60) {
+export function generateToken(payload, expiresInSeconds = 2 * 60 * 60) {
   const header = {
     alg: 'HS256',
     typ: 'JWT'
@@ -86,7 +87,8 @@ export function generateToken(payload, expiresInSeconds = 7 * 24 * 60 * 60) {
     rol: payload.rol ? String(payload.rol).toLowerCase().trim() : 'usuario',
     sede: payload.sede || 'Medellín',
     cargo: payload.cargo || 'Funcionario FMO',
-    iat: now,
+    avatar_url: payload.avatar_url || null,
+    iat: Math.floor(Date.now() / 1000),
     exp: now + expiresInSeconds
   };
 

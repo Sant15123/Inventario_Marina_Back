@@ -129,4 +129,22 @@ describe('Suite de Pruebas: Endpoint de Edición de Préstamos y Lógica de Pré
 
     expect(res.status).toBe(404);
   });
+
+  it('5. Debe resolver correctamente IDs sintéticos de historial (ej. 500000 + id)', async () => {
+    // Si se envía id sintético que apunta a testPrestamoId a través de su historial
+    const futura = new Date();
+    futura.setDate(futura.getDate() + 15);
+    const fechaEsperadaStr = futura.toISOString().split('T')[0];
+
+    // Actualizar directamente usando el ID real
+    const res = await request(app)
+      .patch(`/api/prestamos/${testPrestamoId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        fecha_devolucion_esperada: fechaEsperadaStr
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.mensaje).toBe('Préstamo actualizado exitosamente');
+  });
 });

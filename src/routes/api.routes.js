@@ -2552,7 +2552,7 @@ router.get('/usuarios', async (req, res) => {
   try {
     const { rol, search, sede, activo } = req.query;
 
-    let query = 'SELECT id, documento, nombre_completo, telefono, email, rol, activo, sede, cargo, created_at, updated_at FROM perfiles WHERE 1=1';
+    let query = 'SELECT id, documento, nombre_completo, telefono, email, rol, activo, sede, cargo, avatar_url, created_at, updated_at FROM perfiles WHERE 1=1';
     const params = [];
 
     if (rol) {
@@ -2598,8 +2598,8 @@ const handleGetUsuarioPorId = async (req, res) => {
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 
     const query = isUuid
-      ? 'SELECT id, documento, nombre_completo, telefono, email, rol, activo, sede, cargo, created_at, updated_at FROM perfiles WHERE id = $1'
-      : 'SELECT id, documento, nombre_completo, telefono, email, rol, activo, sede, cargo, created_at, updated_at FROM perfiles WHERE LOWER(documento) = LOWER($1) OR LOWER(email) = LOWER($1)';
+      ? 'SELECT id, documento, nombre_completo, telefono, email, rol, activo, sede, cargo, avatar_url, created_at, updated_at FROM perfiles WHERE id = $1'
+      : 'SELECT id, documento, nombre_completo, telefono, email, rol, activo, sede, cargo, avatar_url, created_at, updated_at FROM perfiles WHERE LOWER(documento) = LOWER($1) OR LOWER(email) = LOWER($1)';
 
     const result = await pool.query(query, [id]);
 
@@ -2625,7 +2625,7 @@ router.get('/perfiles', async (req, res) => {
   try {
     const { rol, search, sede, activo } = req.query;
 
-    let query = 'SELECT id, documento, nombre_completo, telefono, email, rol, activo, sede, cargo, created_at, updated_at FROM perfiles WHERE 1=1';
+    let query = 'SELECT id, documento, nombre_completo, telefono, email, rol, activo, sede, cargo, avatar_url, created_at, updated_at FROM perfiles WHERE 1=1';
     const params = [];
 
     if (rol) {
@@ -2675,6 +2675,7 @@ router.post('/usuarios', requireAdminOnly, async (req, res) => {
       rol,
       sede,
       cargo,
+      avatar_url,
       password
     } = req.body;
 
@@ -2750,7 +2751,8 @@ router.post('/usuarios', requireAdminOnly, async (req, res) => {
         documento: documento.trim(),
         rol: finalRol,
         sede: sede ? String(sede).trim() : 'Medellín',
-        cargo: cargo ? String(cargo).trim() : null
+        cargo: cargo ? String(cargo).trim() : null,
+        avatar_url: avatar_url || null
       }
     });
 
@@ -2770,6 +2772,7 @@ router.post('/usuarios', requireAdminOnly, async (req, res) => {
         rol: finalRol,
         sede: sede ? String(sede).trim() : 'Medellín',
         cargo: cargo ? String(cargo).trim() : null,
+        avatar_url: avatar_url || null,
         password: passwordHash
       })
       .select()
@@ -2845,6 +2848,7 @@ router.put('/usuarios/:id', requireAdminOnly, async (req, res) => {
       sede,
       cargo,
       activo,
+      avatar_url,
       password
     } = req.body;
 
@@ -2888,6 +2892,7 @@ router.put('/usuarios/:id', requireAdminOnly, async (req, res) => {
     if (sede !== undefined) addField('sede', sede ? sede.trim() : null);
     if (cargo !== undefined) addField('cargo', cargo ? cargo.trim() : null);
     if (activo !== undefined && activo !== null) addField('activo', activo);
+    if (avatar_url !== undefined) addField('avatar_url', avatar_url || null);
 
     // CRÍTICO: Bajo ninguna circunstancia actualizar la columna password si viene vacía o no fue enviada
     if (hasValidPassword && passwordHash) {
@@ -2927,6 +2932,7 @@ router.put('/usuarios/:id', requireAdminOnly, async (req, res) => {
             sede,
             cargo,
             activo,
+            avatar_url,
             password,
             created_at,
             updated_at
@@ -2942,6 +2948,7 @@ router.put('/usuarios/:id', requireAdminOnly, async (req, res) => {
             $8,
             COALESCE($9, true),
             $10,
+            $11,
             NOW(),
             NOW()
           )
@@ -2954,6 +2961,7 @@ router.put('/usuarios/:id', requireAdminOnly, async (req, res) => {
             sede = COALESCE(EXCLUDED.sede, perfiles.sede),
             cargo = COALESCE(EXCLUDED.cargo, perfiles.cargo),
             activo = COALESCE(EXCLUDED.activo, perfiles.activo),
+            avatar_url = COALESCE(EXCLUDED.avatar_url, perfiles.avatar_url),
             password = ${hasValidPassword ? 'EXCLUDED.password' : 'perfiles.password'},
             updated_at = NOW()
           RETURNING *;
@@ -2969,6 +2977,7 @@ router.put('/usuarios/:id', requireAdminOnly, async (req, res) => {
           sede || 'Medellín',
           cargo || 'Funcionario FMO',
           activo !== undefined ? activo : true,
+          avatar_url || null,
           defaultHash
         ] : [
           docTarget || 'DOC-' + Date.now(),
@@ -2979,6 +2988,7 @@ router.put('/usuarios/:id', requireAdminOnly, async (req, res) => {
           sede || 'Medellín',
           cargo || 'Funcionario FMO',
           activo !== undefined ? activo : true,
+          avatar_url || null,
           defaultHash
         ];
 
@@ -2993,6 +3003,7 @@ router.put('/usuarios/:id', requireAdminOnly, async (req, res) => {
             sede,
             cargo,
             activo,
+            avatar_url,
             password,
             created_at,
             updated_at
@@ -3008,6 +3019,7 @@ router.put('/usuarios/:id', requireAdminOnly, async (req, res) => {
             $7,
             COALESCE($8, true),
             $9,
+            $10,
             NOW(),
             NOW()
           )
@@ -3020,6 +3032,7 @@ router.put('/usuarios/:id', requireAdminOnly, async (req, res) => {
             sede = COALESCE(EXCLUDED.sede, perfiles.sede),
             cargo = COALESCE(EXCLUDED.cargo, perfiles.cargo),
             activo = COALESCE(EXCLUDED.activo, perfiles.activo),
+            avatar_url = COALESCE(EXCLUDED.avatar_url, perfiles.avatar_url),
             password = ${hasValidPassword ? 'EXCLUDED.password' : 'perfiles.password'},
             updated_at = NOW()
           RETURNING *;
@@ -3041,6 +3054,9 @@ router.put('/usuarios/:id', requireAdminOnly, async (req, res) => {
         const authUpdates = {};
         if (emailFinal) authUpdates.email = emailFinal;
         if (hasValidPassword) authUpdates.password = password.trim();
+        if (avatar_url !== undefined) {
+          authUpdates.user_metadata = { avatar_url: avatar_url || null };
+        }
         if (Object.keys(authUpdates).length > 0) {
           await supabaseAdmin.auth.admin.updateUserById(perfilActualizado.id, authUpdates);
         }

@@ -235,7 +235,8 @@ describe('Suite de Pruebas: Registro de Usuarios con Supabase Auth y Base de Dat
           documento: testDoc,
           rol: 'operador',
           sede: 'Carmen de Viboral',
-          cargo: 'Formador de Semilleros STEAM'
+          cargo: 'Formador de Semilleros STEAM',
+          avatar_url: null
         }
       });
 
